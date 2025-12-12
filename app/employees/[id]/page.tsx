@@ -4,12 +4,20 @@ import { createClient } from "@/utils/supabase/client"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { useEffect, useState } from "react"
-import { Clock, Activity, Calendar, RefreshCw } from "lucide-react"
+import { Clock, Activity, Calendar as CalendarIcon, RefreshCw, Filter } from "lucide-react"
 import { useParams } from "next/navigation"
+import { format } from "date-fns"
+import { cn } from "@/lib/utils"
+
+import { HourlyActivityChart } from "@/components/charts/HourlyActivityChart"
+import { AppUsagePieChart } from "@/components/charts/AppUsagePieChart"
 
 interface Employee {
     id: string
@@ -33,22 +41,20 @@ interface ActivityLog {
 interface AppUsage {
     appName: string
     totalSeconds: number
-    percentage: number
 }
-
-import { HourlyActivityChart } from "@/components/charts/HourlyActivityChart"
-import { AppUsagePieChart } from "@/components/charts/AppUsagePieChart"
 
 export default function EmployeeDetailsPage() {
     const params = useParams()
     const id = params?.id as string
     const [employee, setEmployee] = useState<Employee | null>(null)
     const [logs, setLogs] = useState<ActivityLog[]>([])
-    const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today')
+    const [date, setDate] = useState<Date>(new Date())
     const [stats, setStats] = useState({ totalTime: 0, topApps: [] as AppUsage[] })
     const [hourlyData, setHourlyData] = useState<{ hour: string; activity: number }[]>([])
     const [appUsageData, setAppUsageData] = useState<{ name: string; value: number }[]>([])
     const [loading, setLoading] = useState(false)
+    const [allApps, setAllApps] = useState<string[]>([])
+    const [hiddenApps, setHiddenApps] = useState<string[]>([])
     const supabase = createClient()
 
     const fetchData = async () => {
@@ -57,28 +63,27 @@ export default function EmployeeDetailsPage() {
         const { data: empData } = await supabase.from('employees').select('*').eq('id', id).single()
         if (empData) setEmployee(empData)
 
-        // Fetch Logs
-        let query = supabase
+        // Fetch Logs for selected Date
+        const startOfDay = new Date(date)
+        startOfDay.setHours(0, 0, 0, 0)
+        const endOfDay = new Date(date)
+        endOfDay.setHours(23, 59, 59, 999)
+
+        const { data: logData } = await supabase
             .from('activity_logs')
             .select('*')
             .eq('employee_id', id)
+            .gte('start_time', startOfDay.toISOString())
+            .lte('start_time', endOfDay.toISOString())
             .order('start_time', { ascending: false })
 
-        const now = new Date()
-        if (timeRange === 'today') {
-            const startOfDay = new Date(now.setHours(0, 0, 0, 0)).toISOString()
-            query = query.gte('start_time', startOfDay)
-        } else if (timeRange === 'week') {
-            const startOfWeek = new Date(now.setDate(now.getDate() - 7)).toISOString()
-            query = query.gte('start_time', startOfWeek)
-        } else if (timeRange === 'month') {
-            const startOfMonth = new Date(now.setDate(now.getDate() - 30)).toISOString()
-            query = query.gte('start_time', startOfMonth)
-        }
-
-        const { data: logData } = await query
         if (logData) {
             setLogs(logData)
+
+            // Extract unique apps for filter
+            const uniqueApps = Array.from(new Set(logData.map(l => l.app_name))).sort()
+            setAllApps(uniqueApps)
+
             calculateStats(logData)
         }
         setLoading(false)
@@ -86,15 +91,24 @@ export default function EmployeeDetailsPage() {
 
     useEffect(() => {
         fetchData()
-    }, [id, timeRange])
+    }, [id, date]) // Re-fetch when date changes
+
+    // Re-calculate stats when hiddenApps changes (client-side filtering)
+    useEffect(() => {
+        if (logs.length > 0) {
+            calculateStats(logs)
+        }
+    }, [hiddenApps])
 
     const calculateStats = (data: ActivityLog[]) => {
-        const totalSeconds = data.reduce((acc, log) => acc + log.duration_seconds, 0)
+        // Filter out hidden apps
+        const filteredData = data.filter(log => !hiddenApps.includes(log.app_name))
 
+        const totalSeconds = filteredData.reduce((acc, log) => acc + log.duration_seconds, 0)
         const appMap = new Map<string, number>()
         const hourMap = new Map<number, number>()
 
-        data.forEach(log => {
+        filteredData.forEach(log => {
             // App Usage
             const current = appMap.get(log.app_name) || 0
             appMap.set(log.app_name, current + log.duration_seconds)
@@ -108,33 +122,39 @@ export default function EmployeeDetailsPage() {
         const topApps = Array.from(appMap.entries())
             .map(([appName, seconds]) => ({
                 appName,
-                totalSeconds: seconds,
-                percentage: totalSeconds > 0 ? (seconds / totalSeconds) * 100 : 0
+                totalSeconds: seconds
             }))
             .sort((a, b) => b.totalSeconds - a.totalSeconds)
             .slice(0, 5)
 
-        // App Usage Chart Data
+        // App Usage Chart Data (Hours)
         const appChartData = Array.from(appMap.entries())
-            .map(([name, value]) => ({ name, value }))
+            .map(([name, seconds]) => ({
+                name,
+                value: Math.round((seconds / 3600) * 10) / 10
+            }))
             .sort((a, b) => b.value - a.value)
-            .slice(0, 6) // Top 6 for pie chart
         setAppUsageData(appChartData)
 
-        // Hourly Activity Chart Data
+        // Hourly Activity Chart Data (Hours)
         const hourlyChartData = Array.from({ length: 24 }, (_, i) => {
             const seconds = hourMap.get(i) || 0
-            // Calculate percentage of activity relative to total time (or just raw seconds/minutes?)
-            // Let's show percentage of total activity for that day/period
-            const percentage = totalSeconds > 0 ? Math.round((seconds / totalSeconds) * 100) : 0
             return {
                 hour: `${i}:00`,
-                activity: percentage
+                activity: Math.round((seconds / 3600) * 10) / 10
             }
         })
         setHourlyData(hourlyChartData)
 
         setStats({ totalTime: totalSeconds, topApps })
+    }
+
+    const toggleAppVisibility = (appName: string) => {
+        setHiddenApps(current =>
+            current.includes(appName)
+                ? current.filter(a => a !== appName)
+                : [...current, appName]
+        )
     }
 
     const formatDuration = (seconds: number) => {
@@ -176,20 +196,35 @@ export default function EmployeeDetailsPage() {
                                     )}
                                 </div>
                                 <p className="text-muted-foreground">{employee.email} • {employee.department}</p>
-                                {isOnline(employee.last_heartbeat) && employee.current_app && (
-                                    <p className="text-xs text-green-600 mt-1">
-                                        Currently using: <strong>{employee.current_app}</strong>
-                                    </p>
-                                )}
                             </div>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex space-x-2 items-center">
                             <Button variant="outline" size="icon" onClick={fetchData} disabled={loading} title="Refresh Data">
                                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                             </Button>
-                            <Button variant={timeRange === 'today' ? 'default' : 'outline'} onClick={() => setTimeRange('today')}>Today</Button>
-                            <Button variant={timeRange === 'week' ? 'default' : 'outline'} onClick={() => setTimeRange('week')}>This Week</Button>
-                            <Button variant={timeRange === 'month' ? 'default' : 'outline'} onClick={() => setTimeRange('month')}>Last Month</Button>
+
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant={"outline"}
+                                        className={cn(
+                                            "w-[240px] justify-start text-left font-normal",
+                                            !date && "text-muted-foreground"
+                                        )}
+                                    >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {date ? format(date, "PPP") : <span>Pick a date</span>}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="end">
+                                    <Calendar
+                                        mode="single"
+                                        selected={date}
+                                        onSelect={(d) => d && setDate(d)}
+                                        initialFocus
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
                     </div>
 
@@ -197,12 +232,11 @@ export default function EmployeeDetailsPage() {
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium">Total Active Time</CardTitle>
+                                <CardTitle className="text-sm font-medium">Total for {format(date, "MMM d")}</CardTitle>
                                 <Clock className="h-4 w-4 text-muted-foreground" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">{formatDuration(stats.totalTime)}</div>
-                                <p className="text-xs text-muted-foreground">in selected period</p>
                             </CardContent>
                         </Card>
                         <Card>
@@ -211,10 +245,38 @@ export default function EmployeeDetailsPage() {
                                 <Activity className="h-4 w-4 text-muted-foreground" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{stats.topApps[0]?.appName || "N/A"}</div>
+                                <div className="text-2xl font-bold truncate" title={stats.topApps[0]?.appName}>
+                                    {stats.topApps[0]?.appName || "N/A"}
+                                </div>
                                 <p className="text-xs text-muted-foreground">
-                                    {stats.topApps[0] ? `${formatDuration(stats.topApps[0].totalSeconds)} usage` : "No data"}
+                                    {stats.topApps[0] ? `${formatDuration(stats.topApps[0].totalSeconds)}` : "No data"}
                                 </p>
+                            </CardContent>
+                        </Card>
+
+                        {/* App Visibility Filter Card */}
+                        <Card className="col-span-2">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-medium flex items-center">
+                                    <Filter className="mr-2 h-4 w-4" /> Filter Apps
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="h-[80px] overflow-y-auto">
+                                <div className="flex flex-wrap gap-4">
+                                    {allApps.map(app => (
+                                        <div key={app} className="flex items-center space-x-2">
+                                            <Checkbox
+                                                id={`app-${app}`}
+                                                checked={!hiddenApps.includes(app)}
+                                                onCheckedChange={() => toggleAppVisibility(app)}
+                                            />
+                                            <Label htmlFor={`app-${app}`} className="text-sm cursor-pointer whitespace-nowrap">
+                                                {app}
+                                            </Label>
+                                        </div>
+                                    ))}
+                                    {allApps.length === 0 && <span className="text-sm text-muted-foreground">No apps found for this day.</span>}
+                                </div>
                             </CardContent>
                         </Card>
                     </div>
@@ -228,11 +290,11 @@ export default function EmployeeDetailsPage() {
                     <div className="grid gap-4 md:grid-cols-1">
                         <Card>
                             <CardHeader>
-                                <CardTitle>Recent Activity Logs</CardTitle>
+                                <CardTitle>Activity Logs ({format(date, "MMM d")})</CardTitle>
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-4 max-h-[400px] overflow-y-auto">
-                                    {logs.slice(0, 20).map((log) => (
+                                    {logs.filter(log => !hiddenApps.includes(log.app_name)).slice(0, 50).map((log) => (
                                         <div key={log.id} className="flex items-center justify-between border-b pb-2 last:border-0">
                                             <div className="space-y-1">
                                                 <p className="text-sm font-medium leading-none truncate w-[200px]" title={log.window_title}>
@@ -248,6 +310,7 @@ export default function EmployeeDetailsPage() {
                                             </div>
                                         </div>
                                     ))}
+                                    {logs.length === 0 && <div className="text-center py-4 text-muted-foreground">No logs found.</div>}
                                 </div>
                             </CardContent>
                         </Card>

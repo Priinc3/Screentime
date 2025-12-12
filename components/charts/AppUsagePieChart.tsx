@@ -40,6 +40,7 @@ export function AppUsagePieChart({ data }: AppUsagePieChartProps) {
                         <Tooltip
                             contentStyle={{ backgroundColor: 'var(--background)', borderColor: 'var(--border)' }}
                             itemStyle={{ color: 'var(--foreground)' }}
+                            formatter={(value: number, name: string) => [`${value}h`, name]}
                         />
                         <Legend />
                     </PieChart>
