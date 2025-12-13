@@ -8,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { useEffect, useState } from "react"
-import { CalendarIcon, Trophy, Clock, ArrowUpDown } from "lucide-react"
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays, subWeeks, subMonths } from "date-fns"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useEffect, useState, useRef } from "react"
+import { CalendarIcon, Trophy, Clock, ArrowUpDown, Download, FileText } from "lucide-react"
+import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays, subWeeks, subMonths, eachDayOfInterval, addDays } from "date-fns"
 
 type ViewMode = "daily" | "weekly" | "monthly"
 
@@ -21,6 +23,13 @@ interface EmployeeStats {
     startTime: string | null
     endTime: string | null
     sessionCount: number
+    dailyBreakdown?: { date: string; hours: number }[]
+    topApps?: { name: string; hours: number }[]
+}
+
+interface DayData {
+    date: string
+    hours: number
 }
 
 export default function AnalysisPage() {
@@ -28,6 +37,13 @@ export default function AnalysisPage() {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date())
     const [employeeStats, setEmployeeStats] = useState<EmployeeStats[]>([])
     const [loading, setLoading] = useState(true)
+
+    // Export dialog state
+    const [showExportDialog, setShowExportDialog] = useState(false)
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("")
+    const [exportData, setExportData] = useState<EmployeeStats | null>(null)
+    const reportRef = useRef<HTMLDivElement>(null)
+
     const supabase = createClient()
 
     // Calculate date range based on view mode
@@ -67,18 +83,25 @@ export default function AnalysisPage() {
         }
     }
 
+    // Helper to get local date key
+    const getLocalDateKey = (date: Date) => {
+        const y = date.getFullYear()
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}`
+    }
+
     // Fetch and analyze data
     useEffect(() => {
         const fetchAnalysis = async () => {
             setLoading(true)
             const { start, end } = getDateRange()
 
-            // STEP 1: Fetch ALL valid employees from employees table
+            // STEP 1: Fetch ALL valid employees
             const { data: employees } = await supabase
                 .from('employees')
                 .select('id, full_name')
 
-            // Create a map and set of valid employees
             const empNameMap = new Map<string, string>()
             const validEmployeeIds = new Set<string>()
             if (employees) {
@@ -88,23 +111,19 @@ export default function AnalysisPage() {
                 })
             }
 
-            // Get excluded user IDs from settings
             const excludedIds = getExcludedUserIds()
 
             // STEP 2: Fetch activity logs within date range
+            // Use local date comparison for accuracy
             const { data: rawLogs } = await supabase
                 .from('activity_logs')
-                .select('employee_id, duration_seconds, start_time, end_time')
+                .select('employee_id, duration_seconds, start_time, end_time, app_name')
                 .gte('start_time', start.toISOString())
                 .lte('start_time', end.toISOString())
 
-            // STEP 3: Apply STRICT filtering
-            // - Only include if employee exists in employees table
-            // - Exclude if employee ID is in excluded list
+            // Filter logs
             const filteredLogs = (rawLogs || []).filter(log => {
-                // Must exist in employees table
                 if (!validEmployeeIds.has(log.employee_id)) return false
-                // Must not be excluded
                 if (excludedIds.includes(log.employee_id)) return false
                 return true
             })
@@ -115,12 +134,17 @@ export default function AnalysisPage() {
                 return
             }
 
-            // STEP 4: Aggregate by employee
+            // STEP 3: Generate days for daily breakdown (for weekly/monthly)
+            const daysInRange = eachDayOfInterval({ start, end })
+
+            // STEP 4: Aggregate by employee with daily breakdown
             const empStatsMap = new Map<string, {
                 totalSeconds: number
                 startTime: Date | null
                 endTime: Date | null
                 sessionCount: number
+                dailySeconds: Map<string, number>
+                appSeconds: Map<string, number>
             }>()
 
             filteredLogs.forEach(log => {
@@ -128,16 +152,28 @@ export default function AnalysisPage() {
                     totalSeconds: 0,
                     startTime: null,
                     endTime: null,
-                    sessionCount: 0
+                    sessionCount: 0,
+                    dailySeconds: new Map<string, number>(),
+                    appSeconds: new Map<string, number>()
                 }
 
-                // Cap duration to prevent inflated times (max 2 hours per activity)
                 const cappedDuration = capDuration(log.duration_seconds || 0)
                 existing.totalSeconds += cappedDuration
                 existing.sessionCount += 1
 
                 const logStart = new Date(log.start_time)
                 const logEnd = log.end_time ? new Date(log.end_time) : logStart
+                const dateKey = getLocalDateKey(logStart)
+
+                // Daily breakdown
+                const currentDaily = existing.dailySeconds.get(dateKey) || 0
+                existing.dailySeconds.set(dateKey, currentDaily + cappedDuration)
+
+                // App breakdown
+                if (log.app_name) {
+                    const currentApp = existing.appSeconds.get(log.app_name) || 0
+                    existing.appSeconds.set(log.app_name, currentApp + cappedDuration)
+                }
 
                 if (!existing.startTime || logStart < existing.startTime) {
                     existing.startTime = logStart
@@ -149,16 +185,38 @@ export default function AnalysisPage() {
                 empStatsMap.set(log.employee_id, existing)
             })
 
-            // STEP 5: Convert to array and sort by total hours
+            // STEP 5: Convert to array with daily breakdown
             const statsArray: EmployeeStats[] = Array.from(empStatsMap.entries())
-                .map(([id, stats]) => ({
-                    id,
-                    name: empNameMap.get(id) || `Employee ${id.slice(0, 8)}`,
-                    totalHours: Math.round((stats.totalSeconds / 3600) * 100) / 100,
-                    startTime: stats.startTime ? format(stats.startTime, "hh:mm a") : null,
-                    endTime: stats.endTime ? format(stats.endTime, "hh:mm a") : null,
-                    sessionCount: stats.sessionCount
-                }))
+                .map(([id, stats]) => {
+                    // Build daily breakdown
+                    const dailyBreakdown = daysInRange.map(day => {
+                        const key = getLocalDateKey(day)
+                        return {
+                            date: format(day, "EEE MM/dd"),
+                            hours: Math.round(((stats.dailySeconds.get(key) || 0) / 3600) * 100) / 100
+                        }
+                    })
+
+                    // Build top apps
+                    const topApps = Array.from(stats.appSeconds.entries())
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([name, seconds]) => ({
+                            name,
+                            hours: Math.round((seconds / 3600) * 100) / 100
+                        }))
+
+                    return {
+                        id,
+                        name: empNameMap.get(id) || `Employee ${id.slice(0, 8)}`,
+                        totalHours: Math.round((stats.totalSeconds / 3600) * 100) / 100,
+                        startTime: stats.startTime ? format(stats.startTime, "hh:mm a") : null,
+                        endTime: stats.endTime ? format(stats.endTime, "hh:mm a") : null,
+                        sessionCount: stats.sessionCount,
+                        dailyBreakdown,
+                        topApps
+                    }
+                })
                 .sort((a, b) => b.totalHours - a.totalHours)
 
             setEmployeeStats(statsArray)
@@ -180,6 +238,147 @@ export default function AnalysisPage() {
         }
     }
 
+    // Export report functions
+    const openExportDialog = (employeeId: string) => {
+        setSelectedEmployeeId(employeeId)
+        const empData = employeeStats.find(e => e.id === employeeId)
+        setExportData(empData || null)
+        setShowExportDialog(true)
+    }
+
+    const downloadReport = () => {
+        if (!exportData) return
+
+        const { start, end } = getDateRange()
+        const reportContent = generateReportHTML(exportData, viewMode, start, end)
+
+        const blob = new Blob([reportContent], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${exportData.name.replace(/\s+/g, '_')}_${viewMode}_report_${format(selectedDate, 'yyyy-MM-dd')}.html`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+    }
+
+    const generateReportHTML = (data: EmployeeStats, mode: ViewMode, start: Date, end: Date) => {
+        const periodLabel = mode === 'daily'
+            ? format(selectedDate, "MMMM d, yyyy")
+            : mode === 'weekly'
+                ? `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`
+                : format(selectedDate, "MMMM yyyy")
+
+        const dailyTableRows = data.dailyBreakdown?.map(d => `
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">${d.date}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${d.hours}h</td>
+            </tr>
+        `).join('') || ''
+
+        const appsTableRows = data.topApps?.map(a => `
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">${a.name}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${a.hours}h</td>
+            </tr>
+        `).join('') || ''
+
+        // Generate simple bar chart using CSS
+        const maxHours = Math.max(...(data.dailyBreakdown?.map(d => d.hours) || [1]), 1)
+        const chartBars = data.dailyBreakdown?.map(d => {
+            const height = Math.max((d.hours / maxHours) * 150, 5)
+            return `
+                <div style="display: flex; flex-direction: column; align-items: center; margin: 0 4px;">
+                    <div style="height: ${height}px; width: 30px; background: linear-gradient(180deg, #3b82f6, #1d4ed8); border-radius: 4px 4px 0 0;"></div>
+                    <div style="font-size: 10px; margin-top: 4px;">${d.date.split(' ')[0]}</div>
+                    <div style="font-size: 9px; color: #666;">${d.hours}h</div>
+                </div>
+            `
+        }).join('') || ''
+
+        return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Employee Report - ${data.name}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
+        h1 { color: #1f2937; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+        h2 { color: #374151; margin-top: 30px; }
+        .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
+        .stat-card { background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 28px; font-weight: bold; color: #3b82f6; }
+        .stat-label { font-size: 14px; color: #6b7280; margin-top: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th { background: #f3f4f6; padding: 10px 8px; border: 1px solid #ddd; text-align: left; }
+        .chart-container { display: flex; align-items: flex-end; justify-content: center; height: 200px; padding: 20px; background: #f9fafb; border-radius: 8px; margin: 20px 0; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #6b7280; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>📊 Employee Activity Report</h1>
+    
+    <p><strong>Employee:</strong> ${data.name}</p>
+    <p><strong>Period:</strong> ${periodLabel} (${mode})</p>
+    <p><strong>Generated:</strong> ${format(new Date(), "MMMM d, yyyy 'at' h:mm a")}</p>
+    
+    <h2>Summary</h2>
+    <div class="summary">
+        <div class="stat-card">
+            <div class="stat-value">${data.totalHours}h</div>
+            <div class="stat-label">Total Hours</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${data.sessionCount}</div>
+            <div class="stat-label">Sessions</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${data.startTime || '-'}</div>
+            <div class="stat-label">First Activity</div>
+        </div>
+    </div>
+
+    ${mode !== 'daily' ? `
+    <h2>Daily Breakdown</h2>
+    <div class="chart-container">
+        ${chartBars}
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th style="text-align: right;">Hours</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${dailyTableRows}
+        </tbody>
+    </table>
+    ` : ''}
+
+    <h2>Top Applications</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Application</th>
+                <th style="text-align: right;">Hours</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${appsTableRows || '<tr><td colspan="2" style="text-align: center; padding: 20px;">No app data available</td></tr>'}
+        </tbody>
+    </table>
+
+    <div class="footer">
+        <p>This report was generated by Employee Monitor Dashboard.</p>
+    </div>
+</body>
+</html>
+        `
+    }
+
     return (
         <div className="flex min-h-screen bg-background">
             <aside className="w-64 hidden md:block fixed inset-y-0 z-50">
@@ -196,7 +395,6 @@ export default function AnalysisPage() {
                     <Card>
                         <CardContent className="pt-6">
                             <div className="flex flex-wrap items-center gap-4">
-                                {/* View Mode Buttons */}
                                 <div className="flex gap-2">
                                     {(["daily", "weekly", "monthly"] as ViewMode[]).map((mode) => (
                                         <Button
@@ -210,7 +408,6 @@ export default function AnalysisPage() {
                                     ))}
                                 </div>
 
-                                {/* Date Navigation */}
                                 <div className="flex items-center gap-2">
                                     <Button variant="outline" size="icon" onClick={() => navigatePeriod("prev")}>
                                         ←
@@ -302,35 +499,65 @@ export default function AnalysisPage() {
                                     <table className="w-full text-sm text-left">
                                         <thead className="text-xs uppercase bg-muted/50">
                                             <tr>
-                                                <th className="px-6 py-3">Rank</th>
-                                                <th className="px-6 py-3">Employee</th>
-                                                <th className="px-6 py-3">Total Hours</th>
-                                                <th className="px-6 py-3">First Activity</th>
-                                                <th className="px-6 py-3">Last Activity</th>
-                                                <th className="px-6 py-3">Sessions</th>
+                                                <th className="px-4 py-3">Rank</th>
+                                                <th className="px-4 py-3">Employee</th>
+                                                <th className="px-4 py-3">Total Hours</th>
+                                                {viewMode !== 'daily' && <th className="px-4 py-3">Daily Breakdown</th>}
+                                                <th className="px-4 py-3">First Activity</th>
+                                                <th className="px-4 py-3">Last Activity</th>
+                                                <th className="px-4 py-3">Sessions</th>
+                                                <th className="px-4 py-3">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {employeeStats.map((emp, index) => (
                                                 <tr key={emp.id} className="border-b hover:bg-muted/25">
-                                                    <td className="px-6 py-4">
+                                                    <td className="px-4 py-4">
                                                         {index === 0 && <span className="text-yellow-500">🥇</span>}
                                                         {index === 1 && <span className="text-gray-400">🥈</span>}
                                                         {index === 2 && <span className="text-orange-400">🥉</span>}
                                                         {index > 2 && <span className="text-muted-foreground">#{index + 1}</span>}
                                                     </td>
-                                                    <td className="px-6 py-4 font-medium">{emp.name}</td>
-                                                    <td className="px-6 py-4">
+                                                    <td className="px-4 py-4 font-medium">{emp.name}</td>
+                                                    <td className="px-4 py-4">
                                                         <span className="font-semibold">{emp.totalHours}h</span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-muted-foreground">
+                                                    {viewMode !== 'daily' && (
+                                                        <td className="px-4 py-4">
+                                                            <div className="flex gap-1 items-end h-8">
+                                                                {emp.dailyBreakdown?.slice(0, 7).map((d, i) => {
+                                                                    const maxH = Math.max(...(emp.dailyBreakdown?.map(x => x.hours) || [1]), 0.1)
+                                                                    const height = Math.max((d.hours / maxH) * 100, 5)
+                                                                    return (
+                                                                        <div
+                                                                            key={i}
+                                                                            className="bg-primary/80 rounded-t w-3"
+                                                                            style={{ height: `${height}%` }}
+                                                                            title={`${d.date}: ${d.hours}h`}
+                                                                        />
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        </td>
+                                                    )}
+                                                    <td className="px-4 py-4 text-muted-foreground">
                                                         {emp.startTime || "-"}
                                                     </td>
-                                                    <td className="px-6 py-4 text-muted-foreground">
+                                                    <td className="px-4 py-4 text-muted-foreground">
                                                         {emp.endTime || "-"}
                                                     </td>
-                                                    <td className="px-6 py-4 text-muted-foreground">
+                                                    <td className="px-4 py-4 text-muted-foreground">
                                                         {emp.sessionCount}
+                                                    </td>
+                                                    <td className="px-4 py-4">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => openExportDialog(emp.id)}
+                                                        >
+                                                            <Download className="h-4 w-4 mr-1" />
+                                                            Export
+                                                        </Button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -342,6 +569,86 @@ export default function AnalysisPage() {
                     </Card>
                 </div>
             </main>
+
+            {/* Export Dialog */}
+            <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <FileText className="h-5 w-5" />
+                            Export Report - {exportData?.name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} report for {formatDateRange()}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {exportData && (
+                        <div className="space-y-4" ref={reportRef}>
+                            {/* Summary */}
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-muted p-4 rounded-lg text-center">
+                                    <div className="text-2xl font-bold text-primary">{exportData.totalHours}h</div>
+                                    <div className="text-sm text-muted-foreground">Total Hours</div>
+                                </div>
+                                <div className="bg-muted p-4 rounded-lg text-center">
+                                    <div className="text-2xl font-bold">{exportData.sessionCount}</div>
+                                    <div className="text-sm text-muted-foreground">Sessions</div>
+                                </div>
+                                <div className="bg-muted p-4 rounded-lg text-center">
+                                    <div className="text-lg font-bold">{exportData.startTime || '-'}</div>
+                                    <div className="text-sm text-muted-foreground">First Activity</div>
+                                </div>
+                            </div>
+
+                            {/* Daily Breakdown for weekly/monthly */}
+                            {viewMode !== 'daily' && exportData.dailyBreakdown && (
+                                <div>
+                                    <h4 className="font-semibold mb-2">Daily Breakdown</h4>
+                                    <div className="bg-muted p-4 rounded-lg">
+                                        <div className="flex items-end justify-around h-32 gap-1">
+                                            {exportData.dailyBreakdown.map((d, i) => {
+                                                const maxH = Math.max(...exportData.dailyBreakdown!.map(x => x.hours), 0.1)
+                                                const height = Math.max((d.hours / maxH) * 100, 5)
+                                                return (
+                                                    <div key={i} className="flex flex-col items-center">
+                                                        <div
+                                                            className="bg-primary rounded-t w-6 transition-all"
+                                                            style={{ height: `${height}%` }}
+                                                        />
+                                                        <div className="text-[10px] mt-1">{d.date.split(' ')[0]}</div>
+                                                        <div className="text-[9px] text-muted-foreground">{d.hours}h</div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Top Apps */}
+                            {exportData.topApps && exportData.topApps.length > 0 && (
+                                <div>
+                                    <h4 className="font-semibold mb-2">Top Applications</h4>
+                                    <div className="space-y-2">
+                                        {exportData.topApps.map((app, i) => (
+                                            <div key={i} className="flex items-center justify-between bg-muted p-2 rounded">
+                                                <span>{app.name}</span>
+                                                <span className="font-semibold">{app.hours}h</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <Button onClick={downloadReport} className="w-full">
+                                <Download className="h-4 w-4 mr-2" />
+                                Download HTML Report
+                            </Button>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
