@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { LayoutDashboard, Users, Activity, Settings, LogOut } from "lucide-react"
+import { LayoutDashboard, Users, Activity, Settings, LogOut, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
@@ -30,6 +30,12 @@ export function Sidebar({ className }: SidebarProps) {
                             <Button variant="ghost" className="w-full justify-start">
                                 <Activity className="mr-2 h-4 w-4" />
                                 Live Activity
+                            </Button>
+                        </Link>
+                        <Link href="/analysis">
+                            <Button variant="ghost" className="w-full justify-start">
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Analysis
                             </Button>
                         </Link>
                         <Link href="/settings">
