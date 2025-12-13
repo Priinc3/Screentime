@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/utils/supabase/client"
+import { getExcludedUserIds, saveExcludedUserIds, addExcludedUserId, removeExcludedUserId, MAX_ACTIVITY_DURATION_SECONDS } from "@/utils/dataFilters"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { ThemeToggle } from "@/components/ThemeToggle"
@@ -11,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { Trash2, Plus, Ban, AlertTriangle } from "lucide-react"
+import { Trash2, Plus, Ban, AlertTriangle, RefreshCw } from "lucide-react"
 
 interface Employee {
     id: string
@@ -19,28 +20,6 @@ interface Employee {
     email: string
     department: string
     created_at: string
-}
-
-// Constants for data filtering
-const MAX_ACTIVITY_DURATION_SECONDS = 2 * 60 * 60 // 2 hours max per activity
-const EXCLUDED_USERS_KEY = "excluded_user_ids"
-
-// Helper to get excluded users from localStorage
-export const getExcludedUserIds = (): string[] => {
-    if (typeof window === 'undefined') return []
-    const stored = localStorage.getItem(EXCLUDED_USERS_KEY)
-    return stored ? JSON.parse(stored) : []
-}
-
-// Helper to save excluded users to localStorage
-const saveExcludedUserIds = (ids: string[]) => {
-    localStorage.setItem(EXCLUDED_USERS_KEY, JSON.stringify(ids))
-}
-
-// Export constants for use in other components
-export const DATA_FILTERS = {
-    MAX_ACTIVITY_DURATION_SECONDS,
-    getExcludedUserIds
 }
 
 export default function SettingsPage() {
@@ -101,18 +80,22 @@ export default function SettingsPage() {
             return
         }
 
-        const updated = [...excludedIds, trimmedId]
-        setExcludedIds(updated)
-        saveExcludedUserIds(updated)
+        addExcludedUserId(trimmedId)
+        setExcludedIds(getExcludedUserIds())
         setNewExcludeId("")
         setExcludeError("")
     }
 
     // Remove user from excluded list
     const handleRemoveExclude = (id: string) => {
-        const updated = excludedIds.filter(i => i !== id)
-        setExcludedIds(updated)
-        saveExcludedUserIds(updated)
+        removeExcludedUserId(id)
+        setExcludedIds(getExcludedUserIds())
+    }
+
+    // Quick exclude from employee table
+    const handleQuickExclude = (employeeId: string) => {
+        addExcludedUserId(employeeId)
+        setExcludedIds(getExcludedUserIds())
     }
 
     // Find employee name by ID
@@ -159,11 +142,18 @@ export default function SettingsPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-2 text-sm">
-                                <p>• <strong>Max activity duration:</strong> 2 hours per session (activities longer than this are capped)</p>
+                                <p>• <strong>Max activity duration:</strong> {MAX_ACTIVITY_DURATION_SECONDS / 3600} hours per session (activities longer than this are capped)</p>
+                                <p>• <strong>Employee validation:</strong> Only employees that exist in the employees table are shown</p>
                                 <p>• <strong>Excluded users:</strong> {excludedIds.length} user(s) are being ignored</p>
                                 <p className="text-muted-foreground mt-4">
-                                    These filters are applied across Dashboard, Analysis, and all charts automatically.
+                                    These filters are applied across Dashboard, Analysis, Recent Activity, and all charts automatically.
                                 </p>
+                                <div className="pt-4">
+                                    <Button variant="outline" onClick={() => window.location.reload()}>
+                                        <RefreshCw className="h-4 w-4 mr-2" />
+                                        Refresh to Apply Changes
+                                    </Button>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
@@ -178,6 +168,7 @@ export default function SettingsPage() {
                             <CardDescription>
                                 Enter user IDs to exclude from all reports and analytics.
                                 Activity from these users will be completely ignored.
+                                <strong className="block mt-2">After adding/removing users, refresh the page to apply changes.</strong>
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -234,7 +225,7 @@ export default function SettingsPage() {
                     <Card>
                         <CardHeader>
                             <CardTitle>Employee Management</CardTitle>
-                            <CardDescription>Manage registered employees. Deleting an employee requires admin password.</CardDescription>
+                            <CardDescription>Manage registered employees. Deleting an employee requires admin password. Use the 🚫 button to quickly exclude a user from reports.</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <Table>
@@ -249,7 +240,7 @@ export default function SettingsPage() {
                                 </TableHeader>
                                 <TableBody>
                                     {employees.map((employee) => (
-                                        <TableRow key={employee.id} className={excludedIds.includes(employee.id) ? "opacity-50" : ""}>
+                                        <TableRow key={employee.id} className={excludedIds.includes(employee.id) ? "opacity-50 bg-muted/30" : ""}>
                                             <TableCell className="font-medium">
                                                 {employee.full_name}
                                                 {excludedIds.includes(employee.id) && (
@@ -260,17 +251,23 @@ export default function SettingsPage() {
                                             <TableCell>{employee.department}</TableCell>
                                             <TableCell className="font-mono text-xs">{employee.id.slice(0, 8)}...</TableCell>
                                             <TableCell className="text-right space-x-2">
-                                                {!excludedIds.includes(employee.id) && (
+                                                {!excludedIds.includes(employee.id) ? (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
-                                                        onClick={() => {
-                                                            const updated = [...excludedIds, employee.id]
-                                                            setExcludedIds(updated)
-                                                            saveExcludedUserIds(updated)
-                                                        }}
+                                                        onClick={() => handleQuickExclude(employee.id)}
+                                                        title="Exclude from reports"
                                                     >
                                                         <Ban className="h-4 w-4" />
+                                                    </Button>
+                                                ) : (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveExclude(employee.id)}
+                                                        title="Include in reports"
+                                                    >
+                                                        Include
                                                     </Button>
                                                 )}
                                                 <Button

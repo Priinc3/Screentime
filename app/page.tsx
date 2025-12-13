@@ -1,7 +1,7 @@
 "use client"
 
 import { createClient } from "@/utils/supabase/client"
-import { filterActivityLogs, capDuration, getExcludedUserIds } from "@/utils/dataFilters"
+import { capDuration, getExcludedUserIds } from "@/utils/dataFilters"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { RecentActivity } from "@/components/RecentActivity"
@@ -25,21 +25,44 @@ export default function Home() {
 
   useEffect(() => {
     const fetchStats = async () => {
-      // 1. Active Employees
-      const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-      const { count: activeCount } = await supabase
+      // STEP 1: Fetch ALL valid employees from employees table
+      const { data: employees } = await supabase
         .from('employees')
-        .select('*', { count: 'exact', head: true })
+        .select('id, full_name')
+
+      // Create a Set of valid employee IDs (only those in employees table)
+      const validEmployeeIds = new Set<string>()
+      if (employees) {
+        employees.forEach(emp => validEmployeeIds.add(emp.id))
+      }
+
+      // Get excluded user IDs from settings
+      const excludedIds = getExcludedUserIds()
+
+      // STEP 2: Active Employees (only count non-excluded)
+      const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      const { data: activeEmps } = await supabase
+        .from('employees')
+        .select('id')
         .gte('last_heartbeat', fiveMinsAgo)
 
-      // 2. Fetch Logs for charts
+      const activeCount = activeEmps?.filter(e => !excludedIds.includes(e.id)).length || 0
+
+      // STEP 3: Fetch ALL activity logs
       const { data: rawLogs } = await supabase
         .from('activity_logs')
         .select('employee_id, duration_seconds, app_name, start_time')
 
-      // Apply data filters (exclude users, cap duration)
-      const excludedIds = getExcludedUserIds()
-      const logs = rawLogs?.filter(log => !excludedIds.includes(log.employee_id)) || []
+      // STEP 4: Apply STRICT filtering
+      // - Only include if employee exists in employees table
+      // - Exclude if employee ID is in excluded list
+      const filteredLogs = (rawLogs || []).filter(log => {
+        // Must exist in employees table
+        if (!validEmployeeIds.has(log.employee_id)) return false
+        // Must not be excluded
+        if (excludedIds.includes(log.employee_id)) return false
+        return true
+      })
 
       // Helper to get LOCAL date key (YYYY-MM-DD)
       const getLocalDateKey = (date: Date) => {
@@ -53,25 +76,23 @@ export default function Home() {
       const appMap = new Map<string, number>()
       const dateMap = new Map<string, number>()
 
-      if (logs) {
-        logs.forEach(log => {
-          // Cap duration to prevent inflated times
-          const cappedDuration = capDuration(log.duration_seconds)
-          totalSeconds += cappedDuration
+      filteredLogs.forEach(log => {
+        // Cap duration to prevent inflated times (max 2 hours per activity)
+        const cappedDuration = capDuration(log.duration_seconds)
+        totalSeconds += cappedDuration
 
-          // App Stats
-          const currentApp = appMap.get(log.app_name) || 0
-          appMap.set(log.app_name, currentApp + cappedDuration)
+        // App Stats
+        const currentApp = appMap.get(log.app_name) || 0
+        appMap.set(log.app_name, currentApp + cappedDuration)
 
-          // Daily Stats - use LOCAL date for grouping (converts UTC to user's timezone)
-          const logDate = new Date(log.start_time)
-          const dateKey = getLocalDateKey(logDate)
-          const currentDate = dateMap.get(dateKey) || 0
-          dateMap.set(dateKey, currentDate + cappedDuration)
-        })
-      }
+        // Daily Stats - use LOCAL date for grouping
+        const logDate = new Date(log.start_time)
+        const dateKey = getLocalDateKey(logDate)
+        const currentDate = dateMap.get(dateKey) || 0
+        dateMap.set(dateKey, currentDate + cappedDuration)
+      })
 
-      // 3. Daily Activity Chart Data (Last 7 Days using LOCAL dates)
+      // STEP 5: Daily Activity Chart Data (Last 7 Days)
       const last7Days = Array.from({ length: 7 }, (_, i) => {
         const d = new Date()
         d.setDate(d.getDate() - i)
@@ -79,7 +100,7 @@ export default function Home() {
       }).reverse()
 
       const dailyData = last7Days.map(dateKey => {
-        const [year, month, day] = dateKey.split('-')
+        const [, month, day] = dateKey.split('-')
         return {
           date: `${month}/${day}`,
           hours: Math.round(((dateMap.get(dateKey) || 0) / 3600) * 10) / 10
@@ -87,17 +108,17 @@ export default function Home() {
       })
       setDailyActivityData(dailyData)
 
-      // 4. Global Top Apps Chart
+      // STEP 6: Global Top Apps Chart
       const sortedApps = Array.from(appMap.entries())
-        .sort((a, b) => b[1] - a[1]) // Sort by duration desc
-        .slice(0, 10) // Top 10
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
         .map(([name, seconds]) => ({
           name,
           hours: Math.round((seconds / 3600) * 10) / 10
         }))
       setTopAppsData(sortedApps)
 
-      // 5. Calculate Stats Details
+      // STEP 7: Calculate Stats Details
       let topApp = "None"
       let topAppSeconds = 0
       if (sortedApps.length > 0) {
@@ -109,7 +130,7 @@ export default function Home() {
       const m = Math.floor((totalSeconds % 3600) / 60)
 
       setStats({
-        activeEmployees: activeCount || 0,
+        activeEmployees: activeCount,
         totalActiveTime: `${h}h ${m}m`,
         topApp: topApp,
         topAppUsage: topAppSeconds > 0 ? `${Math.floor(topAppSeconds / 60)}m` : ""

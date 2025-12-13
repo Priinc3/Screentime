@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/utils/supabase/client"
+import { getExcludedUserIds } from "@/utils/dataFilters"
 import {
     Avatar,
     AvatarFallback,
@@ -33,42 +34,56 @@ export function RecentActivity() {
 
     useEffect(() => {
         const fetchActivities = async () => {
-            // 1. Fetch Logs
+            // 1. First fetch valid employees (only show activity for employees that exist)
+            const { data: employees } = await supabase
+                .from('employees')
+                .select('id, full_name')
+
+            // Create a map and set of valid employees
+            const empMap: Record<string, string> = {}
+            const validEmployeeIds = new Set<string>()
+            if (employees) {
+                employees.forEach(e => {
+                    empMap[e.id] = e.full_name
+                    validEmployeeIds.add(e.id)
+                })
+            }
+
+            // Get excluded user IDs from settings
+            const excludedIds = getExcludedUserIds()
+
+            // 2. Fetch Logs (fetch more than limit since we'll filter some out)
             const { data: logsData } = await supabase
                 .from('activity_logs')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(parseInt(limit))
+                .limit(parseInt(limit) * 3) // Fetch extra since we filter
 
-            if (!logsData) return
-
-            // 2. Extract unique employee IDs
-            const employeeIds = Array.from(new Set(logsData.map((log: any) => log.employee_id)))
-
-            // 3. Fetch Employees
-            let empMap: Record<string, string> = {}
-            if (employeeIds.length > 0) {
-                const { data: empData } = await supabase
-                    .from('employees')
-                    .select('id, full_name')
-                    .in('id', employeeIds)
-
-                if (empData) {
-                    empData.forEach((e: any) => {
-                        empMap[e.id] = e.full_name
-                    })
-                }
+            if (!logsData) {
+                setActivities([])
+                return
             }
 
-            // 4. Merge Data
-            const combinedData = logsData.map((log: any) => ({
-                ...log,
-                employees: {
-                    full_name: empMap[log.employee_id] || "Unknown"
-                }
-            }))
+            // 3. Apply STRICT filtering and merge data
+            // - Only include if employee exists in employees table
+            // - Exclude if employee ID is in excluded list
+            const filteredData = logsData
+                .filter(log => {
+                    // Must exist in employees table
+                    if (!validEmployeeIds.has(log.employee_id)) return false
+                    // Must not be excluded
+                    if (excludedIds.includes(log.employee_id)) return false
+                    return true
+                })
+                .slice(0, parseInt(limit)) // Limit after filtering
+                .map(log => ({
+                    ...log,
+                    employees: {
+                        full_name: empMap[log.employee_id] || "Unknown"
+                    }
+                }))
 
-            setActivities(combinedData)
+            setActivities(filteredData)
         }
 
         fetchActivities()
@@ -82,17 +97,24 @@ export function RecentActivity() {
                 table: 'activity_logs'
             }, async (payload) => {
                 const newLog = payload.new as any
+                const excludedIds = getExcludedUserIds()
 
-                // Fetch employee name for the new log immediately
+                // Skip if excluded
+                if (excludedIds.includes(newLog.employee_id)) return
+
+                // Fetch employee name for the new log
                 const { data: emp } = await supabase
                     .from('employees')
                     .select('full_name')
                     .eq('id', newLog.employee_id)
                     .single()
 
+                // Skip if employee doesn't exist in employees table
+                if (!emp) return
+
                 const mergedLog = {
                     ...newLog,
-                    employees: emp || { full_name: "Unknown" }
+                    employees: emp
                 }
 
                 setActivities((current) => [mergedLog, ...current].slice(0, parseInt(limit)))

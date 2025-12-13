@@ -73,38 +73,49 @@ export default function AnalysisPage() {
             setLoading(true)
             const { start, end } = getDateRange()
 
-            // Fetch activity logs within date range
+            // STEP 1: Fetch ALL valid employees from employees table
+            const { data: employees } = await supabase
+                .from('employees')
+                .select('id, full_name')
+
+            // Create a map and set of valid employees
+            const empNameMap = new Map<string, string>()
+            const validEmployeeIds = new Set<string>()
+            if (employees) {
+                employees.forEach(emp => {
+                    empNameMap.set(emp.id, emp.full_name)
+                    validEmployeeIds.add(emp.id)
+                })
+            }
+
+            // Get excluded user IDs from settings
+            const excludedIds = getExcludedUserIds()
+
+            // STEP 2: Fetch activity logs within date range
             const { data: rawLogs } = await supabase
                 .from('activity_logs')
                 .select('employee_id, duration_seconds, start_time, end_time')
                 .gte('start_time', start.toISOString())
                 .lte('start_time', end.toISOString())
 
-            // Apply data filters (exclude users)
-            const excludedIds = getExcludedUserIds()
-            const logs = rawLogs?.filter(log => !excludedIds.includes(log.employee_id)) || []
+            // STEP 3: Apply STRICT filtering
+            // - Only include if employee exists in employees table
+            // - Exclude if employee ID is in excluded list
+            const filteredLogs = (rawLogs || []).filter(log => {
+                // Must exist in employees table
+                if (!validEmployeeIds.has(log.employee_id)) return false
+                // Must not be excluded
+                if (excludedIds.includes(log.employee_id)) return false
+                return true
+            })
 
-            if (logs.length === 0) {
+            if (filteredLogs.length === 0) {
                 setEmployeeStats([])
                 setLoading(false)
                 return
             }
 
-            // Get unique employee IDs (excluding filtered ones)
-            const uniqueEmpIds = Array.from(new Set(logs.map(l => l.employee_id)))
-
-            // Fetch employee names
-            const { data: employees } = await supabase
-                .from('employees')
-                .select('id, full_name')
-                .in('id', uniqueEmpIds)
-
-            const empNameMap = new Map<string, string>()
-            if (employees) {
-                employees.forEach(e => empNameMap.set(e.id, e.full_name))
-            }
-
-            // Aggregate by employee
+            // STEP 4: Aggregate by employee
             const empStatsMap = new Map<string, {
                 totalSeconds: number
                 startTime: Date | null
@@ -112,7 +123,7 @@ export default function AnalysisPage() {
                 sessionCount: number
             }>()
 
-            logs.forEach(log => {
+            filteredLogs.forEach(log => {
                 const existing = empStatsMap.get(log.employee_id) || {
                     totalSeconds: 0,
                     startTime: null,
@@ -120,7 +131,7 @@ export default function AnalysisPage() {
                     sessionCount: 0
                 }
 
-                // Cap duration to prevent inflated times
+                // Cap duration to prevent inflated times (max 2 hours per activity)
                 const cappedDuration = capDuration(log.duration_seconds || 0)
                 existing.totalSeconds += cappedDuration
                 existing.sessionCount += 1
@@ -138,7 +149,7 @@ export default function AnalysisPage() {
                 empStatsMap.set(log.employee_id, existing)
             })
 
-            // Convert to array and sort by total hours
+            // STEP 5: Convert to array and sort by total hours
             const statsArray: EmployeeStats[] = Array.from(empStatsMap.entries())
                 .map(([id, stats]) => ({
                     id,
