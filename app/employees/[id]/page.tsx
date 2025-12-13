@@ -1,6 +1,7 @@
 "use client"
 
 import { createClient } from "@/utils/supabase/client"
+import { capDuration } from "@/utils/dataFilters"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,7 +12,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { useEffect, useState } from "react"
-import { Clock, Activity, Calendar as CalendarIcon, RefreshCw, Filter } from "lucide-react"
+import {
+    Clock, Activity, Calendar as CalendarIcon, RefreshCw, Filter
+} from "lucide-react"
 import { useParams } from "next/navigation"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
@@ -104,18 +107,23 @@ export default function EmployeeDetailsPage() {
         // Filter out hidden apps
         const filteredData = data.filter(log => !hiddenApps.includes(log.app_name))
 
-        const totalSeconds = filteredData.reduce((acc, log) => acc + log.duration_seconds, 0)
+        // APPLY 2HR CAP TO EACH ACTIVITY
+        let totalSeconds = 0
         const appMap = new Map<string, number>()
         const hourMap = new Map<number, number>()
 
         filteredData.forEach(log => {
+            // Cap each activity to 2 hours max
+            const cappedDuration = capDuration(log.duration_seconds)
+            totalSeconds += cappedDuration
+
             // App Usage
             const current = appMap.get(log.app_name) || 0
-            appMap.set(log.app_name, current + log.duration_seconds)
+            appMap.set(log.app_name, current + cappedDuration)
 
             // Hourly Activity
             const hour = new Date(log.start_time).getHours()
-            hourMap.set(hour, (hourMap.get(hour) || 0) + log.duration_seconds)
+            hourMap.set(hour, (hourMap.get(hour) || 0) + cappedDuration)
         })
 
         // Top Apps List
@@ -237,6 +245,7 @@ export default function EmployeeDetailsPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">{formatDuration(stats.totalTime)}</div>
+                                <p className="text-xs text-muted-foreground">(max 2hr per activity cap applied)</p>
                             </CardContent>
                         </Card>
                         <Card>
@@ -303,7 +312,10 @@ export default function EmployeeDetailsPage() {
                                                 <p className="text-xs text-muted-foreground">{log.app_name}</p>
                                             </div>
                                             <div className="text-right">
-                                                <p className="text-sm font-medium">{log.duration_seconds}s</p>
+                                                <p className="text-sm font-medium">
+                                                    {Math.min(log.duration_seconds, 7200)}s
+                                                    {log.duration_seconds > 7200 && <span className="text-yellow-500 text-xs ml-1">(capped)</span>}
+                                                </p>
                                                 <p className="text-xs text-muted-foreground">
                                                     {new Date(log.start_time).toLocaleTimeString()}
                                                 </p>
