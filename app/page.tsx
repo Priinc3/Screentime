@@ -1,6 +1,7 @@
 "use client"
 
 import { createClient } from "@/utils/supabase/client"
+import { filterActivityLogs, capDuration, getExcludedUserIds } from "@/utils/dataFilters"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { RecentActivity } from "@/components/RecentActivity"
@@ -32,9 +33,13 @@ export default function Home() {
         .gte('last_heartbeat', fiveMinsAgo)
 
       // 2. Fetch Logs for charts
-      const { data: logs } = await supabase
+      const { data: rawLogs } = await supabase
         .from('activity_logs')
-        .select('duration_seconds, app_name, start_time')
+        .select('employee_id, duration_seconds, app_name, start_time')
+
+      // Apply data filters (exclude users, cap duration)
+      const excludedIds = getExcludedUserIds()
+      const logs = rawLogs?.filter(log => !excludedIds.includes(log.employee_id)) || []
 
       // Helper to get LOCAL date key (YYYY-MM-DD)
       const getLocalDateKey = (date: Date) => {
@@ -50,17 +55,19 @@ export default function Home() {
 
       if (logs) {
         logs.forEach(log => {
-          totalSeconds += log.duration_seconds
+          // Cap duration to prevent inflated times
+          const cappedDuration = capDuration(log.duration_seconds)
+          totalSeconds += cappedDuration
 
           // App Stats
           const currentApp = appMap.get(log.app_name) || 0
-          appMap.set(log.app_name, currentApp + log.duration_seconds)
+          appMap.set(log.app_name, currentApp + cappedDuration)
 
           // Daily Stats - use LOCAL date for grouping (converts UTC to user's timezone)
           const logDate = new Date(log.start_time)
           const dateKey = getLocalDateKey(logDate)
           const currentDate = dateMap.get(dateKey) || 0
-          dateMap.set(dateKey, currentDate + log.duration_seconds)
+          dateMap.set(dateKey, currentDate + cappedDuration)
         })
       }
 

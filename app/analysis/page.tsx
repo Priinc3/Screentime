@@ -1,6 +1,7 @@
 "use client"
 
 import { createClient } from "@/utils/supabase/client"
+import { capDuration, getExcludedUserIds } from "@/utils/dataFilters"
 import { Sidebar } from "@/components/Sidebar"
 import { Header } from "@/components/Header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -73,19 +74,23 @@ export default function AnalysisPage() {
             const { start, end } = getDateRange()
 
             // Fetch activity logs within date range
-            const { data: logs } = await supabase
+            const { data: rawLogs } = await supabase
                 .from('activity_logs')
                 .select('employee_id, duration_seconds, start_time, end_time')
                 .gte('start_time', start.toISOString())
                 .lte('start_time', end.toISOString())
 
-            if (!logs || logs.length === 0) {
+            // Apply data filters (exclude users)
+            const excludedIds = getExcludedUserIds()
+            const logs = rawLogs?.filter(log => !excludedIds.includes(log.employee_id)) || []
+
+            if (logs.length === 0) {
                 setEmployeeStats([])
                 setLoading(false)
                 return
             }
 
-            // Get unique employee IDs
+            // Get unique employee IDs (excluding filtered ones)
             const uniqueEmpIds = Array.from(new Set(logs.map(l => l.employee_id)))
 
             // Fetch employee names
@@ -115,7 +120,9 @@ export default function AnalysisPage() {
                     sessionCount: 0
                 }
 
-                existing.totalSeconds += log.duration_seconds || 0
+                // Cap duration to prevent inflated times
+                const cappedDuration = capDuration(log.duration_seconds || 0)
+                existing.totalSeconds += cappedDuration
                 existing.sessionCount += 1
 
                 const logStart = new Date(log.start_time)
