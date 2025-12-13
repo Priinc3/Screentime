@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useEffect, useState, useRef } from "react"
 import { CalendarIcon, Trophy, Clock, ArrowUpDown, FileText, Printer, RefreshCw } from "lucide-react"
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays, subWeeks, subMonths, eachDayOfInterval } from "date-fns"
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays, subWeeks, subMonths, eachDayOfInterval } from "date-fns"
 
 type ViewMode = "daily" | "weekly" | "monthly"
 
@@ -25,8 +25,6 @@ interface EmployeeStats {
     id: string
     name: string
     totalHours: number
-    startTime: string | null
-    endTime: string | null
     sessionCount: number
     dailyBreakdown: DayBreakdown[]
     topApp: string
@@ -45,11 +43,21 @@ export default function AnalysisPage() {
 
     const supabase = createClient()
 
+    // Get date range based on view mode
     const getDateRange = () => {
+        const dateStr = (d: Date) => d.toISOString().split('T')[0]
         switch (viewMode) {
-            case "daily": return { start: startOfDay(selectedDate), end: endOfDay(selectedDate) }
-            case "weekly": return { start: startOfWeek(selectedDate, { weekStartsOn: 1 }), end: endOfWeek(selectedDate, { weekStartsOn: 1 }) }
-            case "monthly": return { start: startOfMonth(selectedDate), end: endOfMonth(selectedDate) }
+            case "daily":
+                const dayStr = dateStr(selectedDate)
+                return { startStr: dayStr, endStr: dayStr }
+            case "weekly":
+                const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
+                const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 })
+                return { startStr: dateStr(weekStart), endStr: dateStr(weekEnd) }
+            case "monthly":
+                const monthStart = startOfMonth(selectedDate)
+                const monthEnd = endOfMonth(selectedDate)
+                return { startStr: dateStr(monthStart), endStr: dateStr(monthEnd) }
         }
     }
 
@@ -62,14 +70,16 @@ export default function AnalysisPage() {
         }
     }
 
-    const formatDateStr = (date: Date) => date.toISOString().split('T')[0]
-
-    // Sync today's data to daily_summary
+    // Sync today's data
     const syncToday = async () => {
         setSyncing(true)
         try {
-            await fetch('/api/aggregate-daily', { method: 'POST', body: JSON.stringify({ date: formatDateStr(new Date()) }) })
-            // Refetch data
+            const today = new Date().toISOString().split('T')[0]
+            await fetch('/api/aggregate-daily', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: today })
+            })
             fetchAnalysis()
         } catch (e) {
             console.error('Sync error:', e)
@@ -77,12 +87,10 @@ export default function AnalysisPage() {
         setSyncing(false)
     }
 
-    // MAIN DATA FETCH - Uses daily_summary table for weekly/monthly
+    // FETCH DATA FROM daily_summary TABLE
     const fetchAnalysis = async () => {
         setLoading(true)
-        const { start, end } = getDateRange()
-        const startStr = formatDateStr(start)
-        const endStr = formatDateStr(end)
+        const { startStr, endStr } = getDateRange()
 
         // Fetch employees
         const { data: employees } = await supabase.from('employees').select('id, full_name')
@@ -95,12 +103,15 @@ export default function AnalysisPage() {
 
         const excludedIds = getExcludedUserIds()
 
-        // FETCH FROM daily_summary TABLE (pre-aggregated data!)
+        // FETCH FROM daily_summary TABLE ONLY
         const { data: summaries, error } = await supabase
             .from('daily_summary')
-            .select('*')
+            .select('employee_id, date, total_seconds, session_count, top_app')
             .gte('date', startStr)
             .lte('date', endStr)
+
+        console.log('Query:', { startStr, endStr })
+        console.log('Summaries fetched:', summaries?.length, summaries)
 
         if (error) {
             console.error('Error fetching daily_summary:', error)
@@ -120,15 +131,15 @@ export default function AnalysisPage() {
             return
         }
 
-        // Get all days in range
-        const daysInRange = eachDayOfInterval({ start, end })
+        // Get all days in range for breakdown
+        const startDate = new Date(startStr + 'T00:00:00')
+        const endDate = new Date(endStr + 'T00:00:00')
+        const daysInRange = eachDayOfInterval({ start: startDate, end: endDate })
 
         // Group by employee
         const empData = new Map<string, {
             totalSeconds: number
             sessionCount: number
-            firstActivity: Date | null
-            lastActivity: Date | null
             dailyData: Map<string, number>
             topApp: string
         }>()
@@ -137,27 +148,15 @@ export default function AnalysisPage() {
             const emp = empData.get(s.employee_id) || {
                 totalSeconds: 0,
                 sessionCount: 0,
-                firstActivity: null,
-                lastActivity: null,
                 dailyData: new Map(),
                 topApp: ''
             }
 
-            emp.totalSeconds += s.total_seconds || 0
-            emp.sessionCount += s.session_count || 0
+            // ADD total_seconds from this day's summary
+            emp.totalSeconds += (s.total_seconds || 0)
+            emp.sessionCount += (s.session_count || 0)
             emp.dailyData.set(s.date, s.total_seconds || 0)
-
-            if (s.first_activity) {
-                const fa = new Date(s.first_activity)
-                if (!emp.firstActivity || fa < emp.firstActivity) emp.firstActivity = fa
-            }
-            if (s.last_activity) {
-                const la = new Date(s.last_activity)
-                if (!emp.lastActivity || la > emp.lastActivity) emp.lastActivity = la
-            }
-            if (s.top_app && s.top_app_seconds > 0) {
-                emp.topApp = s.top_app
-            }
+            if (s.top_app) emp.topApp = s.top_app
 
             empData.set(s.employee_id, emp)
         })
@@ -166,7 +165,7 @@ export default function AnalysisPage() {
         const statsArray: EmployeeStats[] = Array.from(empData.entries())
             .map(([id, data]) => {
                 const dailyBreakdown = daysInRange.map(day => {
-                    const dateStr = formatDateStr(day)
+                    const dateStr = day.toISOString().split('T')[0]
                     const seconds = data.dailyData.get(dateStr) || 0
                     return {
                         date: dateStr,
@@ -175,12 +174,15 @@ export default function AnalysisPage() {
                     }
                 })
 
+                // CORRECT CALCULATION: total_seconds / 3600
+                const totalHours = Math.round((data.totalSeconds / 3600) * 100) / 100
+
+                console.log(`Employee ${id}: ${data.totalSeconds} seconds = ${totalHours} hours`)
+
                 return {
                     id,
                     name: empNameMap.get(id) || `Employee ${id.slice(0, 8)}`,
-                    totalHours: Math.round((data.totalSeconds / 3600) * 100) / 100,
-                    startTime: data.firstActivity ? format(data.firstActivity, "hh:mm a") : null,
-                    endTime: data.lastActivity ? format(data.lastActivity, "hh:mm a") : null,
+                    totalHours,
                     sessionCount: data.sessionCount,
                     dailyBreakdown,
                     topApp: data.topApp
@@ -197,10 +199,10 @@ export default function AnalysisPage() {
     }, [viewMode, selectedDate])
 
     const formatDateRange = () => {
-        const { start, end } = getDateRange()
+        const { startStr, endStr } = getDateRange()
         switch (viewMode) {
             case "daily": return format(selectedDate, "EEEE, MMMM d, yyyy")
-            case "weekly": return `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`
+            case "weekly": return `${format(new Date(startStr), "MMM d")} - ${format(new Date(endStr), "MMM d, yyyy")}`
             case "monthly": return format(selectedDate, "MMMM yyyy")
         }
     }
@@ -216,14 +218,14 @@ export default function AnalysisPage() {
         const printWindow = window.open('', '_blank')
         if (!printWindow) return
 
-        const { start, end } = getDateRange()
+        const { startStr, endStr } = getDateRange()
         const periodLabel = viewMode === 'daily'
             ? format(selectedDate, "MMMM d, yyyy")
             : viewMode === 'weekly'
-                ? `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`
+                ? `${format(new Date(startStr), "MMM d")} - ${format(new Date(endStr), "MMM d, yyyy")}`
                 : format(selectedDate, "MMMM yyyy")
 
-        const maxHours = Math.max(...(exportData.dailyBreakdown.map(d => d.hours) || [1]), 0.1)
+        const maxHours = Math.max(...exportData.dailyBreakdown.map(d => d.hours), 0.1)
         const barWidth = 40
         const chartHeight = 150
 
@@ -249,23 +251,21 @@ export default function AnalysisPage() {
             .stat-value{font-size:32px;font-weight:bold;color:#3b82f6}.stat-label{font-size:14px;color:#6b7280;margin-top:5px}
             table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f3f4f6;padding:12px 8px;border:1px solid #ddd;text-align:left}
             .chart-container{background:#f9fafb;padding:20px;border-radius:12px;margin:20px 0;text-align:center}
-            .footer{margin-top:40px;padding-top:20px;border-top:1px solid #ddd;color:#6b7280;font-size:12px;text-align:center}
-            .badge{display:inline-block;background:#dbeafe;color:#1d4ed8;padding:4px 12px;border-radius:20px;font-size:12px}</style></head>
+            .footer{margin-top:40px;padding-top:20px;border-top:1px solid #ddd;color:#6b7280;font-size:12px;text-align:center}</style></head>
             <body><h1>📊 Employee Activity Report</h1>
-            <p><strong>Employee:</strong> ${exportData.name} <span class="badge">${viewMode.toUpperCase()}</span></p>
-            <p><strong>Period:</strong> ${periodLabel}</p>
+            <p><strong>Employee:</strong> ${exportData.name}</p>
+            <p><strong>Period:</strong> ${periodLabel} (${viewMode})</p>
             <p><strong>Generated:</strong> ${format(new Date(), "MMMM d, yyyy 'at' h:mm a")}</p>
             <h2>📈 Summary</h2>
             <div class="summary">
                 <div class="stat-card"><div class="stat-value">${exportData.totalHours}h</div><div class="stat-label">Total Hours</div></div>
                 <div class="stat-card"><div class="stat-value">${exportData.sessionCount}</div><div class="stat-label">Sessions</div></div>
-                <div class="stat-card"><div class="stat-value">${exportData.startTime || '-'}</div><div class="stat-label">First Activity</div></div>
+                <div class="stat-card"><div class="stat-value">${exportData.topApp || 'N/A'}</div><div class="stat-label">Top App</div></div>
             </div>
             ${viewMode !== 'daily' ? `<h2>📅 Daily Breakdown</h2>
             <div class="chart-container"><svg width="${chartWidth}" height="${chartHeight + 40}" style="max-width:100%">${chartBars}</svg></div>
             <table><thead><tr><th>Date</th><th style="text-align:right">Hours</th></tr></thead><tbody>${dailyTable}</tbody></table>` : ''}
-            <h2>🖥️ Top Application</h2><p style="font-size:18px;font-weight:bold">${exportData.topApp || 'N/A'}</p>
-            <div class="footer"><p>Generated by Employee Monitor Dashboard • ${format(new Date(), "yyyy")}</p></div></body></html>`)
+            <div class="footer"><p>Generated by Employee Monitor Dashboard</p></div></body></html>`)
 
         printWindow.document.close()
         printWindow.focus()
@@ -286,7 +286,6 @@ export default function AnalysisPage() {
                         </Button>
                     </div>
 
-                    {/* Filters */}
                     <Card>
                         <CardContent className="pt-6">
                             <div className="flex flex-wrap items-center gap-4">
@@ -315,7 +314,6 @@ export default function AnalysisPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Stats Summary */}
                     {employeeStats.length > 0 && (
                         <div className="grid gap-4 md:grid-cols-3">
                             <Card>
@@ -351,14 +349,13 @@ export default function AnalysisPage() {
                         </div>
                     )}
 
-                    {/* Employee Table */}
                     <Card>
-                        <CardHeader><CardTitle>Employee Work Analysis</CardTitle></CardHeader>
+                        <CardHeader><CardTitle>Employee Work Analysis (from daily_summary)</CardTitle></CardHeader>
                         <CardContent>
                             {loading ? (<div className="text-center py-8 text-muted-foreground">Loading...</div>
                             ) : employeeStats.length === 0 ? (
                                 <div className="text-center py-8 text-muted-foreground">
-                                    No data for this period. <Button variant="link" onClick={syncToday}>Click to sync today's data</Button>
+                                    No data in daily_summary for this period. <Button variant="link" onClick={syncToday}>Click to sync today</Button>
                                 </div>
                             ) : (
                                 <div className="relative overflow-x-auto">
@@ -386,7 +383,7 @@ export default function AnalysisPage() {
                                                     {viewMode !== 'daily' && (
                                                         <td className="px-4 py-4">
                                                             <div className="flex gap-0.5 items-end h-6">
-                                                                {emp.dailyBreakdown.slice(0, 7).map((d, i) => {
+                                                                {emp.dailyBreakdown.map((d, i) => {
                                                                     const max = Math.max(...emp.dailyBreakdown.map(x => x.hours), 0.1)
                                                                     const h = Math.max((d.hours / max) * 100, 8)
                                                                     return <div key={i} title={`${d.dateFormatted}: ${d.hours}h`}
@@ -413,7 +410,6 @@ export default function AnalysisPage() {
                 </div>
             </main>
 
-            {/* Export Dialog */}
             <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
                 <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
@@ -432,8 +428,8 @@ export default function AnalysisPage() {
                                     <div className="text-sm text-muted-foreground">Sessions</div>
                                 </div>
                                 <div className="bg-muted p-4 rounded-lg text-center">
-                                    <div className="text-lg font-bold">{exportData.startTime || '-'}</div>
-                                    <div className="text-sm text-muted-foreground">First Activity</div>
+                                    <div className="text-lg font-bold truncate">{exportData.topApp || '-'}</div>
+                                    <div className="text-sm text-muted-foreground">Top App</div>
                                 </div>
                             </div>
                             {viewMode !== 'daily' && (
