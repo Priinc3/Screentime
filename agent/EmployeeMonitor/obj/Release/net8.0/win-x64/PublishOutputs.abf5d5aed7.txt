@@ -1,0 +1,2 @@
+/Users/princegondaliya/Learning/draft/Screen time/agent/EmployeeMonitor/bin/Release/net8.0/win-x64/publish/EmployeeMonitor.pdb
+/Users/princegondaliya/Learning/draft/Screen time/agent/EmployeeMonitor/bin/Release/net8.0/win-x64/publish/EmployeeMonitor.exe
