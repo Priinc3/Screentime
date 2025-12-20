@@ -97,8 +97,9 @@ export default function AnalysisPage() {
     // FETCH TODAY'S DATA LIVE FROM activity_logs
     const fetchTodayLive = async (employeeIds: Set<string>, excludedIds: string[], empNameMap: Map<string, string>) => {
         const todayStr = getTodayStr()
-        const startOfDay = `${todayStr}T00:00:00.000Z`
-        const endOfDay = `${todayStr}T23:59:59.999Z`
+        // Use IST timezone offset (+05:30) for correct date filtering
+        const startOfDay = `${todayStr}T00:00:00+05:30`
+        const endOfDay = `${todayStr}T23:59:59+05:30`
 
         const { data: logs } = await supabase
             .from('activity_logs')

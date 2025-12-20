@@ -28,9 +28,14 @@ export async function POST() {
         for (let daysAgo = 0; daysAgo < 30; daysAgo++) {
             const date = new Date()
             date.setDate(date.getDate() - daysAgo)
-            const dateStr = date.toISOString().split('T')[0]
-            const startOfDay = `${dateStr}T00:00:00.000Z`
-            const endOfDay = `${dateStr}T23:59:59.999Z`
+            // Use local date format
+            const year = date.getFullYear()
+            const month = String(date.getMonth() + 1).padStart(2, '0')
+            const day = String(date.getDate()).padStart(2, '0')
+            const dateStr = `${year}-${month}-${day}`
+            // Use IST timezone offset (+05:30) for correct date filtering
+            const startOfDay = `${dateStr}T00:00:00+05:30`
+            const endOfDay = `${dateStr}T23:59:59+05:30`
 
             for (const emp of employees) {
                 // Fetch logs for this day
@@ -50,8 +55,10 @@ export async function POST() {
                 const appMap = new Map<string, number>()
 
                 for (const log of logs) {
-                    const cappedDuration = Math.min(log.duration_seconds || 0, MAX_DURATION)
-                    totalSeconds += cappedDuration
+                    // IGNORE activities over 2 hours completely (not cap)
+                    const duration = log.duration_seconds || 0
+                    if (duration > MAX_DURATION) continue // Skip this log entirely
+                    totalSeconds += duration
 
                     const logStartStr = log.start_time
                     const logEndStr = log.end_time || log.start_time
@@ -60,7 +67,7 @@ export async function POST() {
                     if (!lastActivityTime || logEndStr > lastActivityTime) lastActivityTime = logEndStr
 
                     if (log.app_name) {
-                        appMap.set(log.app_name, (appMap.get(log.app_name) || 0) + cappedDuration)
+                        appMap.set(log.app_name, (appMap.get(log.app_name) || 0) + duration)
                     }
                 }
 

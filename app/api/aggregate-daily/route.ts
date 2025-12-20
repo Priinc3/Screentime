@@ -33,8 +33,9 @@ export async function POST(request: Request) {
 
         for (const emp of employees) {
             // Fetch all activity logs for this employee on target date
-            const startOfDay = `${targetDate}T00:00:00.000Z`
-            const endOfDay = `${targetDate}T23:59:59.999Z`
+            // Use IST timezone offset (+05:30) for correct date filtering
+            const startOfDay = `${targetDate}T00:00:00+05:30`
+            const endOfDay = `${targetDate}T23:59:59+05:30`
 
             const { data: logs, error: logError } = await supabase
                 .from('activity_logs')
@@ -53,15 +54,17 @@ export async function POST(request: Request) {
                 continue
             }
 
-            // Aggregate with 2hr cap per activity
+            // Aggregate - IGNORE activities over 2hr completely
             let totalSeconds = 0
             let firstActivityTime: string | null = null
             let lastActivityTime: string | null = null
             const appMap = new Map<string, number>()
 
             for (const log of logs) {
-                const cappedDuration = Math.min(log.duration_seconds || 0, MAX_DURATION_SECONDS)
-                totalSeconds += cappedDuration
+                // IGNORE activities over 2 hours completely (not cap)
+                const duration = log.duration_seconds || 0
+                if (duration > MAX_DURATION_SECONDS) continue // Skip this log entirely
+                totalSeconds += duration
 
                 const logStartStr = log.start_time
                 const logEndStr = log.end_time || log.start_time
@@ -70,7 +73,7 @@ export async function POST(request: Request) {
                 if (!lastActivityTime || logEndStr > lastActivityTime) lastActivityTime = logEndStr
 
                 if (log.app_name) {
-                    appMap.set(log.app_name, (appMap.get(log.app_name) || 0) + cappedDuration)
+                    appMap.set(log.app_name, (appMap.get(log.app_name) || 0) + duration)
                 }
             }
 

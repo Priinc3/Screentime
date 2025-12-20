@@ -66,18 +66,23 @@ export default function EmployeeDetailsPage() {
         const { data: empData } = await supabase.from('employees').select('*').eq('id', id).single()
         if (empData) setEmployee(empData)
 
-        // Fetch Logs for selected Date
-        const startOfDay = new Date(date)
-        startOfDay.setHours(0, 0, 0, 0)
-        const endOfDay = new Date(date)
-        endOfDay.setHours(23, 59, 59, 999)
+        // Fetch Logs for selected Date - use local timezone
+        // Format as IST timezone for accurate date filtering
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const dateStr = `${year}-${month}-${day}`
+
+        // Use IST timezone offset (+05:30) for correct filtering
+        const startOfDay = `${dateStr}T00:00:00+05:30`
+        const endOfDay = `${dateStr}T23:59:59+05:30`
 
         const { data: logData } = await supabase
             .from('activity_logs')
             .select('*')
             .eq('employee_id', id)
-            .gte('start_time', startOfDay.toISOString())
-            .lte('start_time', endOfDay.toISOString())
+            .gte('start_time', startOfDay)
+            .lte('start_time', endOfDay)
             .order('start_time', { ascending: false })
 
         if (logData) {
