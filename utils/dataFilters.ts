@@ -55,11 +55,14 @@ export function removeExcludedUserId(id: string): void {
 }
 
 /**
- * Cap a duration value to the maximum allowed
+ * Check if activity duration is valid (under 2 hours)
+ * Activities over 2 hours are IGNORED completely (return 0)
  */
 export function capDuration(seconds: number | null | undefined): number {
     if (!seconds || seconds < 0) return 0
-    return Math.min(seconds, MAX_ACTIVITY_DURATION_SECONDS)
+    // IGNORE activities over 2 hours completely
+    if (seconds > MAX_ACTIVITY_DURATION_SECONDS) return 0
+    return seconds
 }
 
 /**

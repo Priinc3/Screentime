@@ -43,23 +43,29 @@ export default function AnalysisPage() {
 
     const supabase = createClient()
 
-    const getTodayStr = () => new Date().toISOString().split('T')[0]
-    const getDateStr = (d: Date) => d.toISOString().split('T')[0]
+    // LOCAL timezone date string (not UTC!)
+    const getLocalDateStr = (d: Date) => {
+        const year = d.getFullYear()
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+    }
+    const getTodayStr = () => getLocalDateStr(new Date())
 
     // Get date range based on view mode
     const getDateRange = () => {
         switch (viewMode) {
             case "daily":
-                const dayStr = getDateStr(selectedDate)
+                const dayStr = getLocalDateStr(selectedDate)
                 return { startStr: dayStr, endStr: dayStr }
             case "weekly":
                 const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
                 const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 })
-                return { startStr: getDateStr(weekStart), endStr: getDateStr(weekEnd) }
+                return { startStr: getLocalDateStr(weekStart), endStr: getLocalDateStr(weekEnd) }
             case "monthly":
                 const monthStart = startOfMonth(selectedDate)
                 const monthEnd = endOfMonth(selectedDate)
-                return { startStr: getDateStr(monthStart), endStr: getDateStr(monthEnd) }
+                return { startStr: getLocalDateStr(monthStart), endStr: getLocalDateStr(monthEnd) }
         }
     }
 
@@ -174,7 +180,7 @@ export default function AnalysisPage() {
 
         // Fetch historical data from daily_summary (excluding today)
         const historicalEndStr = needsTodayLive ?
-            getDateStr(subDays(new Date(todayStr), 1)) : endStr
+            getLocalDateStr(subDays(new Date(todayStr), 1)) : endStr
 
         if (startStr <= historicalEndStr) {
             const { data: summaries } = await supabase
@@ -240,7 +246,7 @@ export default function AnalysisPage() {
         allStats = allStats.map(emp => ({
             ...emp,
             dailyBreakdown: daysInRange.map(day => ({
-                date: getDateStr(day),
+                date: getLocalDateStr(day),
                 dateFormatted: format(day, "EEE MM/dd"),
                 hours: 0 // Simplified - would need more complex logic for per-day breakdown
             }))
@@ -255,7 +261,7 @@ export default function AnalysisPage() {
 
         // Auto-refresh every 30 seconds for today's data
         const interval = setInterval(() => {
-            if (viewMode === 'daily' && getDateStr(selectedDate) === getTodayStr()) {
+            if (viewMode === 'daily' && getLocalDateStr(selectedDate) === getTodayStr()) {
                 fetchAnalysis()
             }
         }, 30000)
@@ -272,7 +278,7 @@ export default function AnalysisPage() {
         }
     }
 
-    const isViewingToday = viewMode === 'daily' && getDateStr(selectedDate) === getTodayStr()
+    const isViewingToday = viewMode === 'daily' && getLocalDateStr(selectedDate) === getTodayStr()
 
     const openExportDialog = (employeeId: string) => {
         const emp = employeeStats.find(e => e.id === employeeId)
