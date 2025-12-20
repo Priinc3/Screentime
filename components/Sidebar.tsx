@@ -14,7 +14,7 @@ export function Sidebar({ className }: SidebarProps) {
                         Admin Panel
                     </h2>
                     <div className="space-y-1">
-                        <Link href="/">
+                        <Link href="/analysis">
                             <Button variant="ghost" className="w-full justify-start">
                                 <LayoutDashboard className="mr-2 h-4 w-4" />
                                 Dashboard
@@ -30,12 +30,6 @@ export function Sidebar({ className }: SidebarProps) {
                             <Button variant="ghost" className="w-full justify-start">
                                 <Activity className="mr-2 h-4 w-4" />
                                 Live Activity
-                            </Button>
-                        </Link>
-                        <Link href="/analysis">
-                            <Button variant="ghost" className="w-full justify-start">
-                                <BarChart3 className="mr-2 h-4 w-4" />
-                                Analysis
                             </Button>
                         </Link>
                         <Link href="/settings">
