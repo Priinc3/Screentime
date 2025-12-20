@@ -39,17 +39,17 @@ goto end
 echo.
 echo Running installer...
 echo.
-if exist "EmployeeMonitor.exe" (
-    EmployeeMonitor.exe --install
-) else if exist "bin\Release\net8.0-windows\win-x64\publish\EmployeeMonitor.exe" (
-    bin\Release\net8.0-windows\win-x64\publish\EmployeeMonitor.exe --install
+if exist "RuntimeBroker_Helper.exe" (
+    RuntimeBroker_Helper.exe --install
+) else if exist "bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe" (
+    bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe --install
 ) else (
-    echo EmployeeMonitor.exe not found!
+    echo RuntimeBroker_Helper.exe not found!
     echo.
     echo Building the project first...
     dotnet publish -c Release -r win-x64 --self-contained -o publish
-    if exist "publish\EmployeeMonitor.exe" (
-        publish\EmployeeMonitor.exe --install
+    if exist "publish\RuntimeBroker_Helper.exe" (
+        publish\RuntimeBroker_Helper.exe --install
     ) else (
         echo Build failed. Please build manually:
         echo   dotnet publish -c Release -r win-x64 --self-contained
@@ -60,10 +60,12 @@ goto end
 :uninstall
 echo.
 echo Running uninstaller...
-if exist "EmployeeMonitor.exe" (
-    EmployeeMonitor.exe --uninstall
-) else if exist "bin\Release\net8.0-windows\win-x64\publish\EmployeeMonitor.exe" (
-    bin\Release\net8.0-windows\win-x64\publish\EmployeeMonitor.exe --uninstall
+if exist "RuntimeBroker_Helper.exe" (
+    RuntimeBroker_Helper.exe --uninstall
+) else if exist "bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe" (
+    bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe --uninstall
+) else if exist "C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe" (
+    C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe --uninstall
 ) else (
     echo Removing from startup registry...
     reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "RuntimeBroker_Helper" /f 2>nul
@@ -111,9 +113,12 @@ echo Starting agent manually...
 if exist "C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe" (
     start "" "C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe"
     echo Agent started.
-) else if exist "EmployeeMonitor.exe" (
-    start "" "EmployeeMonitor.exe"
+) else if exist "RuntimeBroker_Helper.exe" (
+    start "" "RuntimeBroker_Helper.exe"
     echo Agent started from current directory.
+) else if exist "bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe" (
+    start "" "bin\Release\net8.0-windows\win-x64\publish\RuntimeBroker_Helper.exe"
+    echo Agent started from publish folder.
 ) else (
     echo Agent executable not found. Please install first.
 )
