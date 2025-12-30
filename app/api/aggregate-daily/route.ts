@@ -37,19 +37,39 @@ export async function POST(request: Request) {
             const startOfDay = `${targetDate}T00:00:00+05:30`
             const endOfDay = `${targetDate}T23:59:59+05:30`
 
-            const { data: logs, error: logError } = await supabase
-                .from('activity_logs')
-                .select('duration_seconds, start_time, end_time, app_name')
-                .eq('employee_id', emp.id)
-                .gte('start_time', startOfDay)
-                .lte('start_time', endOfDay)
+            // Fetch ALL logs with pagination (bypass 1000 limit)
+            const allLogs: any[] = []
+            let from = 0
+            const batchSize = 1000
+            let hasMore = true
 
-            if (logError) {
-                console.error(`Error fetching logs for ${emp.id}:`, logError)
-                continue
+            while (hasMore) {
+                const { data: logs, error: logError } = await supabase
+                    .from('activity_logs')
+                    .select('duration_seconds, start_time, end_time, app_name')
+                    .eq('employee_id', emp.id)
+                    .gte('start_time', startOfDay)
+                    .lte('start_time', endOfDay)
+                    .range(from, from + batchSize - 1)
+
+                if (logError) {
+                    console.error(`Error fetching logs for ${emp.id}:`, logError)
+                    break
+                }
+
+                if (logs && logs.length > 0) {
+                    allLogs.push(...logs)
+                    from += batchSize
+
+                    if (logs.length < batchSize) {
+                        hasMore = false
+                    }
+                } else {
+                    hasMore = false
+                }
             }
 
-            if (!logs || logs.length === 0) {
+            if (allLogs.length === 0) {
                 // No activity for this employee on this date
                 continue
             }
@@ -60,7 +80,7 @@ export async function POST(request: Request) {
             let lastActivityTime: string | null = null
             const appMap = new Map<string, number>()
 
-            for (const log of logs) {
+            for (const log of allLogs) {
                 // IGNORE activities over 2 hours completely (not cap)
                 const duration = log.duration_seconds || 0
                 if (duration > MAX_DURATION_SECONDS) continue // Skip this log entirely
@@ -94,7 +114,7 @@ export async function POST(request: Request) {
                     employee_id: emp.id,
                     date: targetDate,
                     total_seconds: totalSeconds,
-                    session_count: logs.length,
+                    session_count: allLogs.length,
                     first_activity: firstActivityTime,
                     last_activity: lastActivityTime,
                     top_app: topApp,
@@ -111,7 +131,7 @@ export async function POST(request: Request) {
                     employee: emp.full_name,
                     date: targetDate,
                     totalHours: Math.round((totalSeconds / 3600) * 100) / 100,
-                    sessions: logs.length
+                    sessions: allLogs.length
                 })
             }
         }

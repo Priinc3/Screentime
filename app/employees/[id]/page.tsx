@@ -77,22 +77,46 @@ export default function EmployeeDetailsPage() {
         const startOfDay = `${dateStr}T00:00:00+05:30`
         const endOfDay = `${dateStr}T23:59:59+05:30`
 
-        const { data: logData } = await supabase
-            .from('activity_logs')
-            .select('*')
-            .eq('employee_id', id)
-            .gte('start_time', startOfDay)
-            .lte('start_time', endOfDay)
-            .order('start_time', { ascending: false })
+        // Fetch ALL logs with pagination (bypass 1000 limit)
+        const allLogs: ActivityLog[] = []
+        let from = 0
+        const batchSize = 1000
+        let hasMore = true
 
-        if (logData) {
-            setLogs(logData)
+        while (hasMore) {
+            const { data: logData } = await supabase
+                .from('activity_logs')
+                .select('*')
+                .eq('employee_id', id)
+                .gte('start_time', startOfDay)
+                .lte('start_time', endOfDay)
+                .order('start_time', { ascending: false })
+                .range(from, from + batchSize - 1)
+
+            if (logData && logData.length > 0) {
+                allLogs.push(...logData)
+                from += batchSize
+
+                // If we got less than batchSize, we've reached the end
+                if (logData.length < batchSize) {
+                    hasMore = false
+                }
+            } else {
+                hasMore = false
+            }
+        }
+
+        if (allLogs.length > 0) {
+            setLogs(allLogs)
 
             // Extract unique apps for filter
-            const uniqueApps = Array.from(new Set(logData.map(l => l.app_name))).sort()
+            const uniqueApps = Array.from(new Set(allLogs.map(l => l.app_name))).sort()
             setAllApps(uniqueApps)
 
-            calculateStats(logData)
+            calculateStats(allLogs)
+        } else {
+            setLogs([])
+            setAllApps([])
         }
         setLoading(false)
     }

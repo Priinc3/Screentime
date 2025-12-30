@@ -101,18 +101,38 @@ export default function AnalysisPage() {
         const startOfDay = `${todayStr}T00:00:00+05:30`
         const endOfDay = `${todayStr}T23:59:59+05:30`
 
-        const { data: logs } = await supabase
-            .from('activity_logs')
-            .select('employee_id, duration_seconds, app_name')
-            .gte('start_time', startOfDay)
-            .lte('start_time', endOfDay)
+        // Fetch ALL logs with pagination (bypass 1000 limit)
+        const allLogs: any[] = []
+        let from = 0
+        const batchSize = 1000
+        let hasMore = true
 
-        if (!logs || logs.length === 0) return []
+        while (hasMore) {
+            const { data: logs } = await supabase
+                .from('activity_logs')
+                .select('employee_id, duration_seconds, app_name')
+                .gte('start_time', startOfDay)
+                .lte('start_time', endOfDay)
+                .range(from, from + batchSize - 1)
+
+            if (logs && logs.length > 0) {
+                allLogs.push(...logs)
+                from += batchSize
+
+                if (logs.length < batchSize) {
+                    hasMore = false
+                }
+            } else {
+                hasMore = false
+            }
+        }
+
+        if (allLogs.length === 0) return []
 
         // Aggregate by employee
         const empData = new Map<string, { seconds: number, sessions: number, apps: Map<string, number> }>()
 
-        for (const log of logs) {
+        for (const log of allLogs) {
             if (!employeeIds.has(log.employee_id)) continue
             if (excludedIds.includes(log.employee_id)) continue
 
@@ -184,17 +204,37 @@ export default function AnalysisPage() {
             getLocalDateStr(subDays(new Date(todayStr), 1)) : endStr
 
         if (startStr <= historicalEndStr) {
-            const { data: summaries } = await supabase
-                .from('daily_summary')
-                .select('employee_id, date, total_seconds, session_count, top_app')
-                .gte('date', startStr)
-                .lte('date', historicalEndStr)
+            // Fetch ALL summaries with pagination (bypass 1000 limit)
+            const allSummaries: any[] = []
+            let from = 0
+            const batchSize = 1000
+            let hasMore = true
+
+            while (hasMore) {
+                const { data: summaries } = await supabase
+                    .from('daily_summary')
+                    .select('employee_id, date, total_seconds, session_count, top_app')
+                    .gte('date', startStr)
+                    .lte('date', historicalEndStr)
+                    .range(from, from + batchSize - 1)
+
+                if (summaries && summaries.length > 0) {
+                    allSummaries.push(...summaries)
+                    from += batchSize
+
+                    if (summaries.length < batchSize) {
+                        hasMore = false
+                    }
+                } else {
+                    hasMore = false
+                }
+            }
 
             // Process historical summaries
-            if (summaries && summaries.length > 0) {
+            if (allSummaries && allSummaries.length > 0) {
                 const empData = new Map<string, { seconds: number, sessions: number, topApp: string, dailyData: Map<string, number> }>()
 
-                for (const s of summaries) {
+                for (const s of allSummaries) {
                     if (!validEmployeeIds.has(s.employee_id)) continue
                     if (excludedIds.includes(s.employee_id)) continue
 
