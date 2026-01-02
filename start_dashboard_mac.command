@@ -1,5 +1,5 @@
 #!/bin/bash
-cd "$(dirname "$0")/dashboard"
+cd "$(dirname "$0")"
 echo "Starting Employee Monitor Dashboard..."
 
 # Open browser after 3 seconds in background

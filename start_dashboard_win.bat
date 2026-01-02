@@ -1,5 +1,5 @@
 @echo off
-cd dashboard
+cd /d "%~dp0"
 echo Starting Employee Monitor Dashboard...
 :: Open browser
 start "" "http://localhost:3000"
