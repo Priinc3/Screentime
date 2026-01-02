@@ -1,0 +1,324 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weekDay",
+              "triggerAtHour": 9,
+              "triggerAtDay": 1
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "monthDay",
+              "triggerAtHour": 9,
+              "triggerAtDay": 1
+            }
+          ]
+        }
+      },
+      "id": "monthly-trigger",
+      "name": "Monthly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst istOffset = 5.5 * 60 * 60 * 1000;\nconst istNow = new Date(now.getTime() + istOffset);\nconst yesterday = new Date(istNow);\nyesterday.setDate(yesterday.getDate() - 1);\nconst year = yesterday.getFullYear();\nconst month = String(yesterday.getMonth() + 1).padStart(2, '0');\nconst day = String(yesterday.getDate()).padStart(2, '0');\nreturn { reportType: 'daily', startDate: `${year}-${month}-${day}`, endDate: `${year}-${month}-${day}`, dateLabel: `${day}/${month}/${year}` };"
+      },
+      "id": "daily-dates",
+      "name": "Daily Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst istOffset = 5.5 * 60 * 60 * 1000;\nconst istNow = new Date(now.getTime() + istOffset);\nconst lastMonday = new Date(istNow);\nconst dayOfWeek = lastMonday.getDay();\nconst daysToLastMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;\nlastMonday.setDate(lastMonday.getDate() - daysToLastMonday - 7);\nconst lastSunday = new Date(lastMonday);\nlastSunday.setDate(lastMonday.getDate() + 6);\nconst fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;\nconst lbl = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;\nreturn { reportType: 'weekly', startDate: fmt(lastMonday), endDate: fmt(lastSunday), dateLabel: `${lbl(lastMonday)} - ${lbl(lastSunday)} ${lastSunday.getFullYear()}` };"
+      },
+      "id": "weekly-dates",
+      "name": "Weekly Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst istOffset = 5.5 * 60 * 60 * 1000;\nconst istNow = new Date(now.getTime() + istOffset);\nconst first = new Date(istNow.getFullYear(), istNow.getMonth() - 1, 1);\nconst last = new Date(istNow.getFullYear(), istNow.getMonth(), 0);\nconst fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;\nconst months = ['January','February','March','April','May','June','July','August','September','October','November','December'];\nreturn { reportType: 'monthly', startDate: fmt(first), endDate: fmt(last), dateLabel: `${months[first.getMonth()]} ${first.getFullYear()}` };"
+      },
+      "id": "monthly-dates",
+      "name": "Monthly Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://cvrtaecpuwbyixxxiclt.supabase.co/rest/v1/employees?select=*",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2cnRhZWNwdXdieWl4eHhpY2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NDY1MDIsImV4cCI6MjA4MDMyMjUwMn0.7zGRwxySIyUZdgVtnEYxVHxPcksQ5zonmh7Bx-ozbOw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2cnRhZWNwdXdieWl4eHhpY2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NDY1MDIsImV4cCI6MjA4MDMyMjUwMn0.7zGRwxySIyUZdgVtnEYxVHxPcksQ5zonmh7Bx-ozbOw"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-emp",
+      "name": "Fetch Employees",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        650,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ (() => { try { const d = $('Daily Dates').first().json; return 'https://cvrtaecpuwbyixxxiclt.supabase.co/rest/v1/daily_summary?select=*&date=eq.' + d.startDate; } catch(e) { try { const w = $('Weekly Dates').first().json; return 'https://cvrtaecpuwbyixxxiclt.supabase.co/rest/v1/daily_summary?select=*&date=gte.' + w.startDate + '&date=lte.' + w.endDate; } catch(e2) { const m = $('Monthly Dates').first().json; return 'https://cvrtaecpuwbyixxxiclt.supabase.co/rest/v1/daily_summary?select=*&date=gte.' + m.startDate + '&date=lte.' + m.endDate; } } })() }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2cnRhZWNwdXdieWl4eHhpY2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NDY1MDIsImV4cCI6MjA4MDMyMjUwMn0.7zGRwxySIyUZdgVtnEYxVHxPcksQ5zonmh7Bx-ozbOw"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2cnRhZWNwdXdieWl4eHhpY2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NDY1MDIsImV4cCI6MjA4MDMyMjUwMn0.7zGRwxySIyUZdgVtnEYxVHxPcksQ5zonmh7Bx-ozbOw"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-summary",
+      "name": "Fetch Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        850,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get date info from date calculation nodes\nlet dateInfo;\ntry { dateInfo = $('Daily Dates').first().json; } catch(e) {\n  try { dateInfo = $('Weekly Dates').first().json; } catch(e2) {\n    dateInfo = $('Monthly Dates').first().json;\n  }\n}\n\nlet employees = [];\nlet summaries = [];\n\ntry { employees = $('Fetch Employees').all().map(i => i.json); } catch(e) {}\ntry { summaries = $('Fetch Summary').all().map(i => i.json); } catch(e) {}\n\nif (employees.length === 1 && Array.isArray(employees[0])) employees = employees[0];\nif (summaries.length === 1 && Array.isArray(summaries[0])) summaries = summaries[0];\n\nconst uniqueSummaries = [...new Map(summaries.map(s => [s.id, s])).values()];\n\nconst empMap = new Map();\nfor (const e of employees) {\n  empMap.set(e.id, { id: e.id, full_name: e.full_name || 'Unknown', email: e.email || '', department: e.department || 'Unassigned', total_seconds: 0, sessions: 0, days: 0, top_app: '', top_app_seconds: 0 });\n}\n\nfor (const s of uniqueSummaries) {\n  const emp = empMap.get(s.employee_id);\n  if (emp) {\n    emp.total_seconds += s.total_seconds || 0;\n    emp.sessions += s.session_count || 0;\n    emp.days += 1;\n    if ((s.top_app_seconds || 0) > emp.top_app_seconds) {\n      emp.top_app = s.top_app || 'None';\n      emp.top_app_seconds = s.top_app_seconds || 0;\n    }\n  }\n}\n\nconst fmt = (s) => { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };\n\nconst list = [];\nfor (const [id, emp] of empMap) {\n  if (emp.total_seconds === 0) continue;\n  list.push({ ...emp, total_fmt: fmt(emp.total_seconds), avg_daily: emp.days > 0 ? fmt(Math.round(emp.total_seconds / emp.days)) : '0m' });\n}\n\nlist.sort((a, b) => b.total_seconds - a.total_seconds);\n\nconst totalSeconds = list.reduce((s, e) => s + e.total_seconds, 0);\n\nreturn { reportType: dateInfo.reportType || 'daily', dateLabel: dateInfo.dateLabel || '', startDate: dateInfo.startDate || '', endDate: dateInfo.endDate || '', summary: { employees: list.length, total_time: fmt(totalSeconds), total_sessions: list.reduce((s,e) => s + e.sessions, 0), avg: fmt(Math.round(totalSeconds / (list.length || 1))) }, employees: list };"
+      },
+      "id": "aggregate",
+      "name": "Aggregate Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst gen = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });\nconst titles = { daily: '📊 Daily Report', weekly: '📈 Weekly Report', monthly: '📅 Monthly Report' };\nconst title = `${titles[d.reportType] || 'Report'} - ${d.dateLabel}`;\n\nconst maxTime = Math.max(...d.employees.map(e => e.total_seconds), 1);\n\nlet html = `<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px}\n.container{max-width:900px;margin:0 auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}\n.header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:40px;text-align:center;position:relative}\n.header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#f093fb,#f5576c,#4facfe,#00f2fe)}\n.header h1{font-size:32px;font-weight:700;margin-bottom:10px;text-shadow:0 2px 10px rgba(0,0,0,.2)}\n.header .date{font-size:14px;opacity:.9}\n.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;padding:30px;background:#f8f9ff}\n.stat-card{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border-radius:16px;padding:25px;text-align:center;box-shadow:0 8px 16px rgba(102,126,234,.4);transition:transform .3s}\n.stat-card:hover{transform:translateY(-5px)}\n.stat-value{font-size:36px;font-weight:700;margin-bottom:8px}\n.stat-label{font-size:13px;opacity:.9;text-transform:uppercase;letter-spacing:1px}\n.section{padding:30px}\n.section-title{font-size:22px;font-weight:700;color:#333;margin-bottom:25px;border-bottom:3px solid #667eea;padding-bottom:10px}\n.emp-card{background:linear-gradient(135deg,#f8f9ff 0%,#fff 100%);border-radius:16px;padding:25px;margin-bottom:20px;border-left:5px solid #667eea;box-shadow:0 4px 12px rgba(0,0,0,.08);transition:all .3s}\n.emp-card:hover{box-shadow:0 8px 24px rgba(0,0,0,.12);transform:translateX(5px)}\n.emp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}\n.emp-info h3{font-size:20px;color:#333;margin-bottom:5px}\n.emp-info p{font-size:13px;color:#888}\n.emp-time{font-size:32px;font-weight:700;color:#667eea}\n.progress-bar{background:#e8ecff;border-radius:10px;height:12px;margin:15px 0;overflow:hidden;position:relative}\n.progress-fill{height:100%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:10px;transition:width 1s ease}\n.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:15px;margin-top:15px}\n.mini-stat{background:#fff;padding:15px;border-radius:10px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.05)}\n.mini-stat-value{font-size:20px;font-weight:700;color:#667eea;margin-bottom:5px}\n.mini-stat-label{font-size:11px;color:#999;text-transform:uppercase}\n.top-app{background:#667eea;color:#fff;display:inline-block;padding:8px 16px;border-radius:20px;font-size:14px;font-weight:600;margin-top:10px}\n.footer{background:#f5f5f5;padding:25px;text-align:center;font-size:13px;color:#888}\n@media(max-width:600px){.stats-grid{grid-template-columns:1fr}.emp-header{flex-direction:column;gap:15px}}\n</style></head><body>\n<div class=\"container\">\n<div class=\"header\"><h1>${title}</h1><div class=\"date\">Generated: ${gen}</div></div>\n<div class=\"stats-grid\">\n<div class=\"stat-card\"><div class=\"stat-value\">${d.summary.employees}</div><div class=\"stat-label\">Employees</div></div>\n<div class=\"stat-card\"><div class=\"stat-value\">${d.summary.total_time}</div><div class=\"stat-label\">Total Time</div></div>\n<div class=\"stat-card\"><div class=\"stat-value\">${d.summary.total_sessions}</div><div class=\"stat-label\">Sessions</div></div>\n<div class=\"stat-card\"><div class=\"stat-value\">${d.summary.avg}</div><div class=\"stat-label\">Avg/Employee</div></div>\n</div>\n<div class=\"section\"><h2 class=\"section-title\">👥 Employee Performance</h2>`;\n\nfor (const e of d.employees) {\n  const barWidth = (e.total_seconds / maxTime * 100).toFixed(1);\n  html += `<div class=\"emp-card\"><div class=\"emp-header\"><div class=\"emp-info\"><h3>${e.full_name}</h3><p>${e.department}${e.email ? ' • ' + e.email : ''}</p></div><div class=\"emp-time\">${e.total_fmt}</div></div><div class=\"progress-bar\"><div class=\"progress-fill\" style=\"width:${barWidth}%\"></div></div><div class=\"stats-row\"><div class=\"mini-stat\"><div class=\"mini-stat-value\">${e.sessions}</div><div class=\"mini-stat-label\">Sessions</div></div><div class=\"mini-stat\"><div class=\"mini-stat-value\">${e.days}</div><div class=\"mini-stat-label\">Days Active</div></div><div class=\"mini-stat\"><div class=\"mini-stat-value\">${e.avg_daily}</div><div class=\"mini-stat-label\">Avg Daily</div></div></div><div class=\"top-app\">🏆 Top App: ${e.top_app}</div></div>`;\n}\n\nhtml += `</div><div class=\"footer\"><p><strong>Screen Time Monitoring System</strong></p><p>Automated report for productivity tracking</p></div></div></body></html>`;\n\nreturn { subject: title, html };"
+      },
+      "id": "gen-html",
+      "name": "Generate HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "princemg774@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1450,
+        600
+      ],
+      "webhookId": "41265190-7ba4-4811-82b8-01f2d38cc9c2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "LG8ge52ue9UEyKHL",
+          "name": "prince gpid"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Trigger": {
+      "main": [
+        [
+          {
+            "node": "Daily Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Weekly Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Monthly Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Dates": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Dates": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly Dates": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employees",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Employees": {
+      "main": [
+        [
+          {
+            "node": "Fetch Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Summary": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Data": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6c117294c561256781e273716b2dd9fec5b63fca097f0770dfa6acd6dddd1ee8"
+  }
+}
