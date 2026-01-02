@@ -18,36 +18,49 @@ cd "$SCRIPT_DIR"
 
 find_python() {
     # Check multiple Python paths in priority order
-    local python_paths=(
+    # We explicitly check versions 3.12 down to 3.8 to find the newest compatible one
+    local python_candidates=(
+        "python3.12" "python3.11" "python3.10" "python3.9" "python3.8"
         "python3"
-        "/opt/homebrew/bin/python3"      # Homebrew (Apple Silicon)
-        "/usr/local/bin/python3"         # Homebrew (Intel)
-        "/Library/Frameworks/Python.framework/Versions/3.*/bin/python3"  # python.org installer
-        "/usr/bin/python3"               # Xcode Command Line Tools
+        "python"
+        "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.*/bin/python3"
+        "/usr/bin/python3"
     )
     
-    for python_cmd in "${python_paths[@]}"; do
-        # Handle glob patterns
+    for python_cmd in "${python_candidates[@]}"; do
+        # Handle glob patterns if present
         for resolved_path in $python_cmd; do
-            if [ -x "$resolved_path" ] 2>/dev/null || command -v "$resolved_path" &> /dev/null; then
-                echo "$resolved_path"
-                return 0
+            if command -v "$resolved_path" &> /dev/null; then
+                # Check if it's actually Python 3.8+
+                local version=$("$resolved_path" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
+                local major=$(echo "$version" | cut -d. -f1)
+                local minor=$(echo "$version" | cut -d. -f2)
+                
+                if [ "$major" -eq 3 ] && [ "$minor" -ge 8 ]; then
+                    echo "$resolved_path"
+                    return 0
+                fi
             fi
         done
     done
     return 1
 }
 
-check_python_version() {
+install_pip_fallback() {
     local python_cmd="$1"
-    local version=$("$python_cmd" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
-    local major=$(echo "$version" | cut -d. -f1)
-    local minor=$(echo "$version" | cut -d. -f2)
+    echo -e "${BLUE}Attempting to install pip via get-pip.py...${NC}"
     
-    if [ "$major" -ge 3 ] && [ "$minor" -ge 8 ]; then
+    # Download get-pip.py
+    if curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py; then
+        "$python_cmd" get-pip.py --user
+        rm get-pip.py
         return 0
+    else
+        echo -e "${RED}Failed to download get-pip.py${NC}"
+        return 1
     fi
-    return 1
 }
 
 install_python_homebrew() {
@@ -72,6 +85,8 @@ install_python_homebrew() {
     # Verify installation
     if command -v python3 &> /dev/null; then
         echo -e "${GREEN}✅ Python installed successfully!${NC}"
+        # Return path to installed python
+        echo $(command -v python3)
         return 0
     else
         echo -e "${RED}❌ Python installation failed${NC}"
@@ -101,6 +116,18 @@ show_python_install_instructions() {
     echo ""
     echo -e "${YELLOW}After installing Python, run this script again.${NC}"
     echo ""
+}
+
+check_python_version() {
+    local python_cmd="$1"
+    local version=$("$python_cmd" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
+    local major=$(echo "$version" | cut -d. -f1)
+    local minor=$(echo "$version" | cut -d. -f2)
+    
+    if [ "$major" -ge 3 ] && [ "$minor" -ge 8 ]; then
+        return 0
+    fi
+    return 1
 }
 
 # ============================================
@@ -137,7 +164,7 @@ if [ -z "$PYTHON_CMD" ]; then
     fi
 fi
 
-# Verify Python version
+# Verify Python version (double check)
 if ! check_python_version "$PYTHON_CMD"; then
     echo -e "${RED}❌ Python version too old. Python 3.8+ is required.${NC}"
     echo -e "${YELLOW}Current: $($PYTHON_CMD --version 2>&1)${NC}"
@@ -175,7 +202,9 @@ case $choice in
             # Ensure pip is installed
             if ! "$PYTHON_CMD" -m pip --version &>/dev/null; then
                 echo -e "${BLUE}Installing pip...${NC}"
-                "$PYTHON_CMD" -m ensurepip --upgrade --default-pip
+                if ! "$PYTHON_CMD" -m ensurepip --upgrade --default-pip 2>/dev/null; then
+                     install_pip_fallback "$PYTHON_CMD"
+                fi
             fi
             
             echo "Installing dependencies..."
@@ -189,7 +218,9 @@ case $choice in
             # Ensure pip in venv (sometimes venv creation skips it)
             if ! python -m pip --version &>/dev/null; then
                 echo -e "${BLUE}Installing pip in virtual environment...${NC}"
-                python -m ensurepip --upgrade --default-pip
+                if ! python -m ensurepip --upgrade --default-pip 2>/dev/null; then
+                    install_pip_fallback "python"
+                fi
             fi
             
             echo -e "${BLUE}Installing dependencies...${NC}"
