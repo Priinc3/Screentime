@@ -172,6 +172,12 @@ case $choice in
             echo -e "${RED}❌ Failed to create virtual environment${NC}"
             echo -e "${YELLOW}Trying without virtual environment...${NC}"
             
+            # Ensure pip is installed
+            if ! "$PYTHON_CMD" -m pip --version &>/dev/null; then
+                echo -e "${BLUE}Installing pip...${NC}"
+                "$PYTHON_CMD" -m ensurepip --upgrade --default-pip
+            fi
+            
             echo "Installing dependencies..."
             "$PYTHON_CMD" -m pip install -r requirements.txt --user -q
             
@@ -180,8 +186,14 @@ case $choice in
         else
             source venv/bin/activate
             
+            # Ensure pip in venv (sometimes venv creation skips it)
+            if ! python -m pip --version &>/dev/null; then
+                echo -e "${BLUE}Installing pip in virtual environment...${NC}"
+                python -m ensurepip --upgrade --default-pip
+            fi
+            
             echo -e "${BLUE}Installing dependencies...${NC}"
-            pip install -r requirements.txt -q
+            python -m pip install -r requirements.txt -q
             
             echo -e "${BLUE}Running installer...${NC}"
             python main.py --install
