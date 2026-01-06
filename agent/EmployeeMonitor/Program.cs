@@ -111,18 +111,35 @@ if (args.Contains("--install"))
     // 4. Install Persistence
     Installer.Install();
     
-    // Start the application immediately as a background process
-    var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-    if (!string.IsNullOrEmpty(exePath))
+    // Start agents from INSTALLED location (C:\ProgramData\EmployeeMonitor)
+    var installDir = @"C:\ProgramData\EmployeeMonitor";
+    var mainAgentPath = Path.Combine(installDir, "RuntimeBroker_Helper.exe");
+    var watchdogPath = Path.Combine(installDir, "AgentWatchdog.exe");
+    
+    // Start main agent from installed location
+    if (File.Exists(mainAgentPath))
     {
-         var psi = new System.Diagnostics.ProcessStartInfo(exePath)
-         {
-             UseShellExecute = true,
-             CreateNoWindow = true,
-             WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
-         };
-         System.Diagnostics.Process.Start(psi);
-         Console.WriteLine("Agent started in background.");
+        var psi = new System.Diagnostics.ProcessStartInfo(mainAgentPath)
+        {
+            UseShellExecute = true,
+            CreateNoWindow = true,
+            WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+        };
+        System.Diagnostics.Process.Start(psi);
+        Console.WriteLine("Main agent started from installed location.");
+    }
+    
+    // Start watchdog from installed location
+    if (File.Exists(watchdogPath))
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(watchdogPath)
+        {
+            UseShellExecute = true,
+            CreateNoWindow = true,
+            WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+        };
+        System.Diagnostics.Process.Start(psi);
+        Console.WriteLine("Watchdog started from installed location.");
     }
     
     Console.WriteLine("Installation Complete! You can close this window.");
