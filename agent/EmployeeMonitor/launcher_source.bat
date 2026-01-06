@@ -13,6 +13,7 @@ if %errorLevel% neq 0 (
 )
 
 cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
 
 echo ==========================================
 echo    Employee Monitor - Source Install
@@ -77,31 +78,41 @@ echo.
 echo Building main agent from source code...
 echo This may take 2-3 minutes on first run.
 echo.
+cd /d "%SCRIPT_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 if %errorLevel% neq 0 (
     echo Main agent build failed!
     goto end
 )
+echo Main agent build complete!
 
 echo.
 echo Building watchdog from source code...
-cd ..\AgentWatchdog
-dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\EmployeeMonitor\publish
-cd ..\EmployeeMonitor
-if %errorLevel% neq 0 (
-    echo Watchdog build failed! Continuing with main agent only...
+set "WATCHDOG_DIR=%SCRIPT_DIR%\..\AgentWatchdog"
+if exist "%WATCHDOG_DIR%\AgentWatchdog.csproj" (
+    cd /d "%WATCHDOG_DIR%"
+    dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o "%SCRIPT_DIR%\publish"
+    if %errorLevel% neq 0 (
+        echo Watchdog build failed! Continuing with main agent only...
+    ) else (
+        echo Watchdog build complete!
+    )
+    cd /d "%SCRIPT_DIR%"
 ) else (
-    echo Watchdog build complete!
+    echo Watchdog project not found at: %WATCHDOG_DIR%
+    echo Continuing with main agent only...
 )
 
 echo.
 echo Build complete! Running installer...
+cd /d "%SCRIPT_DIR%"
 publish\RuntimeBroker_Helper.exe --install
 goto end
 
 :uninstall
 echo.
 echo Running uninstaller...
+cd /d "%SCRIPT_DIR%"
 if exist "publish\RuntimeBroker_Helper.exe" (
     publish\RuntimeBroker_Helper.exe --uninstall
 ) else if exist "C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe" (
@@ -166,6 +177,7 @@ goto end
 :buildonly
 echo.
 echo Building main agent from source...
+cd /d "%SCRIPT_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 if %errorLevel% neq 0 (
     echo Main agent build failed!
@@ -175,13 +187,18 @@ echo Main agent: publish\RuntimeBroker_Helper.exe
 
 echo.
 echo Building watchdog from source...
-cd ..\AgentWatchdog
-dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\EmployeeMonitor\publish
-cd ..\EmployeeMonitor
-if %errorLevel% neq 0 (
-    echo Watchdog build failed!
+set "WATCHDOG_DIR=%SCRIPT_DIR%\..\AgentWatchdog"
+if exist "%WATCHDOG_DIR%\AgentWatchdog.csproj" (
+    cd /d "%WATCHDOG_DIR%"
+    dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o "%SCRIPT_DIR%\publish"
+    if %errorLevel% neq 0 (
+        echo Watchdog build failed!
+    ) else (
+        echo Watchdog: publish\AgentWatchdog.exe
+    )
+    cd /d "%SCRIPT_DIR%"
 ) else (
-    echo Watchdog: publish\AgentWatchdog.exe
+    echo Watchdog project not found at: %WATCHDOG_DIR%
 )
 echo.
 echo Build complete!
