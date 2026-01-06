@@ -74,14 +74,26 @@ goto end
 
 :install
 echo.
-echo Building from source code...
+echo Building main agent from source code...
 echo This may take 2-3 minutes on first run.
 echo.
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 if %errorLevel% neq 0 (
-    echo Build failed!
+    echo Main agent build failed!
     goto end
 )
+
+echo.
+echo Building watchdog from source code...
+cd ..\AgentWatchdog
+dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\EmployeeMonitor\publish
+cd ..\EmployeeMonitor
+if %errorLevel% neq 0 (
+    echo Watchdog build failed! Continuing with main agent only...
+) else (
+    echo Watchdog build complete!
+)
+
 echo.
 echo Build complete! Running installer...
 publish\RuntimeBroker_Helper.exe --install
@@ -95,9 +107,15 @@ if exist "publish\RuntimeBroker_Helper.exe" (
 ) else if exist "C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe" (
     C:\ProgramData\EmployeeMonitor\RuntimeBroker_Helper.exe --uninstall
 ) else (
-    echo Removing from registry and killing process...
+    echo Removing scheduled tasks...
+    schtasks /Delete /TN "EmployeeMonitorAgent" /F 2>nul
+    schtasks /Delete /TN "EmployeeMonitorWatchdog" /F 2>nul
+    echo Removing from registry...
     reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "RuntimeBroker_Helper" /f 2>nul
+    echo Killing processes...
     taskkill /F /IM RuntimeBroker_Helper.exe 2>nul
+    taskkill /F /IM AgentWatchdog.exe 2>nul
+    echo Removing files...
     rmdir /s /q "C:\ProgramData\EmployeeMonitor" 2>nul
     echo Uninstall complete.
 )
@@ -106,11 +124,35 @@ goto end
 :status
 echo.
 echo Checking agent status...
+echo.
+echo --- Main Agent ---
 tasklist /FI "IMAGENAME eq RuntimeBroker_Helper.exe" 2>NUL | find /I "RuntimeBroker_Helper.exe" >NUL
 if "%ERRORLEVEL%"=="0" (
-    echo [RUNNING] Agent is currently running
+    echo [RUNNING] Main agent is currently running
 ) else (
-    echo [STOPPED] Agent is NOT running
+    echo [STOPPED] Main agent is NOT running
+)
+echo.
+echo --- Watchdog ---
+tasklist /FI "IMAGENAME eq AgentWatchdog.exe" 2>NUL | find /I "AgentWatchdog.exe" >NUL
+if "%ERRORLEVEL%"=="0" (
+    echo [RUNNING] Watchdog is currently running
+) else (
+    echo [STOPPED] Watchdog is NOT running
+)
+echo.
+echo --- Task Scheduler ---
+schtasks /query /TN "EmployeeMonitorAgent" >NUL 2>&1
+if "%ERRORLEVEL%"=="0" (
+    echo [OK] Main agent scheduled task exists
+) else (
+    echo [NOT FOUND] Main agent scheduled task missing
+)
+schtasks /query /TN "EmployeeMonitorWatchdog" >NUL 2>&1
+if "%ERRORLEVEL%"=="0" (
+    echo [OK] Watchdog scheduled task exists
+) else (
+    echo [NOT FOUND] Watchdog scheduled task missing
 )
 echo.
 if exist "C:\ProgramData\EmployeeMonitor\config.json" (
@@ -123,13 +165,26 @@ goto end
 
 :buildonly
 echo.
-echo Building from source...
+echo Building main agent from source...
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
-if %errorLevel% equ 0 (
-    echo Build complete! Executable at: publish\RuntimeBroker_Helper.exe
-) else (
-    echo Build failed!
+if %errorLevel% neq 0 (
+    echo Main agent build failed!
+    goto end
 )
+echo Main agent: publish\RuntimeBroker_Helper.exe
+
+echo.
+echo Building watchdog from source...
+cd ..\AgentWatchdog
+dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\EmployeeMonitor\publish
+cd ..\EmployeeMonitor
+if %errorLevel% neq 0 (
+    echo Watchdog build failed!
+) else (
+    echo Watchdog: publish\AgentWatchdog.exe
+)
+echo.
+echo Build complete!
 goto end
 
 :end

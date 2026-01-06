@@ -192,6 +192,21 @@ var host = builder.Build();
 var service = host.Services.GetRequiredService<SupabaseService>();
 await service.InitializeAsync();
 
+// Check for updates (non-blocking, but if update found, we exit)
+try
+{
+    var shouldExit = await AutoUpdater.CheckAndUpdateAsync();
+    if (shouldExit)
+    {
+        // Update is being applied, exit to allow update script to replace us
+        return;
+    }
+}
+catch
+{
+    // Update check failed, continue with normal operation
+}
+
 host.Run();
 
 // --- P/Invoke Definitions ---

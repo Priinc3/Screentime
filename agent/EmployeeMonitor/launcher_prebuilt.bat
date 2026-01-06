@@ -59,8 +59,11 @@ echo Uninstalling agent...
 RuntimeBroker_Helper.exe --uninstall
 if %errorLevel% neq 0 (
     echo Forcing uninstall...
+    schtasks /Delete /TN "EmployeeMonitorAgent" /F 2>nul
+    schtasks /Delete /TN "EmployeeMonitorWatchdog" /F 2>nul
     reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "RuntimeBroker_Helper" /f 2>nul
     taskkill /F /IM RuntimeBroker_Helper.exe 2>nul
+    taskkill /F /IM AgentWatchdog.exe 2>nul
     rmdir /s /q "C:\ProgramData\EmployeeMonitor" 2>nul
     echo Uninstall complete.
 )
@@ -70,11 +73,34 @@ goto end
 echo.
 echo Checking agent status...
 echo.
+echo --- Main Agent ---
 tasklist /FI "IMAGENAME eq RuntimeBroker_Helper.exe" 2>NUL | find /I "RuntimeBroker_Helper.exe" >NUL
 if "%ERRORLEVEL%"=="0" (
-    echo [RUNNING] Agent is currently running
+    echo [RUNNING] Main agent is currently running
 ) else (
-    echo [STOPPED] Agent is NOT running
+    echo [STOPPED] Main agent is NOT running
+)
+echo.
+echo --- Watchdog ---
+tasklist /FI "IMAGENAME eq AgentWatchdog.exe" 2>NUL | find /I "AgentWatchdog.exe" >NUL
+if "%ERRORLEVEL%"=="0" (
+    echo [RUNNING] Watchdog is currently running
+) else (
+    echo [STOPPED] Watchdog is NOT running
+)
+echo.
+echo --- Task Scheduler ---
+schtasks /query /TN "EmployeeMonitorAgent" >NUL 2>&1
+if "%ERRORLEVEL%"=="0" (
+    echo [OK] Main agent scheduled task exists
+) else (
+    echo [NOT FOUND] Main agent scheduled task missing
+)
+schtasks /query /TN "EmployeeMonitorWatchdog" >NUL 2>&1
+if "%ERRORLEVEL%"=="0" (
+    echo [OK] Watchdog scheduled task exists
+) else (
+    echo [NOT FOUND] Watchdog scheduled task missing
 )
 echo.
 if exist "C:\ProgramData\EmployeeMonitor\config.json" (
