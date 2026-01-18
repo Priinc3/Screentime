@@ -53,17 +53,31 @@ class SupabaseBackend(DatabaseBackend):
             return None
     
     def create_employee(self, name: str, employee_id: Optional[str] = None) -> Employee:
-        """Create a new employee"""
+        """Create a new employee (basic)"""
+        return self.create_employee_full(name, None, None, employee_id)
+    
+    def create_employee_full(
+        self, 
+        name: str, 
+        email: Optional[str] = None,
+        department: Optional[str] = None,
+        employee_id: Optional[str] = None
+    ) -> Employee:
+        """Create a new employee with full details"""
         if not self.client:
             raise RuntimeError("Database not connected")
         
         new_id = employee_id or str(uuid.uuid4())
         
+        # Generate email if not provided
+        if not email:
+            email = f"{name.lower().replace(' ', '.')}@example.com"
+        
         employee_data = {
             'id': new_id,
             'full_name': name,
-            'email': f"{name.lower().replace(' ', '.')}@example.com",
-            'department': 'General',
+            'email': email,
+            'department': department or 'General',
             'created_at': datetime.now(timezone.utc).isoformat()
         }
         
@@ -86,13 +100,35 @@ class SupabaseBackend(DatabaseBackend):
             print(f"Error updating heartbeat: {e}")
             return False
     
-    def log_activity(self, activity: ActivityLog) -> bool:
-        """Log an activity session"""
+    def log_activity(
+        self, 
+        activity: Optional[ActivityLog] = None,
+        employee_id: Optional[str] = None,
+        app_name: Optional[str] = None,
+        window_title: Optional[str] = None,
+        duration_seconds: Optional[int] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None
+    ) -> bool:
+        """Log an activity session - accepts either ActivityLog or raw params"""
         if not self.client:
             return False
         
         try:
-            self.client.table('activity_logs').insert(activity.to_dict()).execute()
+            if activity:
+                data = activity.to_dict()
+            else:
+                # Build from raw params (used by offline sync)
+                data = {
+                    'employee_id': employee_id,
+                    'app_name': app_name,
+                    'window_title': window_title,
+                    'duration': duration_seconds,
+                    'start_time': start_time,
+                    'end_time': end_time
+                }
+            
+            self.client.table('activity_logs').insert(data).execute()
             return True
         except Exception as e:
             print(f"Error logging activity: {e}")
