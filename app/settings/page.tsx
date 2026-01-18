@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { Trash2, Plus, Ban, AlertTriangle, RefreshCw } from "lucide-react"
+import { Trash2, Plus, Ban, AlertTriangle, RefreshCw, Database } from "lucide-react"
+import { DatabaseConfigPanel } from "@/components/DatabaseConfigPanel"
 
 interface Employee {
     id: string
@@ -128,6 +129,9 @@ export default function SettingsPage() {
                             <ThemeToggle />
                         </CardContent>
                     </Card>
+
+                    {/* Database Configuration */}
+                    <DatabaseConfigPanel />
 
                     {/* Data Filtering Info */}
                     <Card className="border-yellow-500/50">

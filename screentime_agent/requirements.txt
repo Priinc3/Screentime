@@ -1,0 +1,17 @@
+# Screen Time Agent Dependencies
+
+# Core - Database clients
+supabase>=2.0.0
+
+# GUI - System tray/Menu bar (optional, installed during build)
+# macOS: rumps
+# Windows: pystray, pillow
+
+# Optional: For PostgreSQL direct connection
+# psycopg2-binary>=2.9.0
+
+# Optional: For Windows process detection (fallback)
+# psutil>=5.9.0
+
+# Build tools (only needed for creating installers)
+# pyinstaller>=6.0.0
