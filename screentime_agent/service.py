@@ -70,9 +70,13 @@ class ScreenTimeService:
         self.last_activity_time: datetime = datetime.now(timezone.utc)
         self.was_sleeping = False
         
-        # Setup signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        # Setup signal handlers (only works in main thread)
+        try:
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
+        except ValueError:
+            # Not in main thread, signals will be handled by parent
+            pass
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""

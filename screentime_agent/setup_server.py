@@ -10,6 +10,7 @@ import webbrowser
 import threading
 import json
 import os
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -415,27 +416,33 @@ class SetupServer:
         # Set the callback
         SetupHandler.on_register = self.register_employee
         
-        # Create server
+        # Create server with allow_reuse_address
+        socketserver.TCPServer.allow_reuse_address = True
+        
         try:
             self.server = socketserver.TCPServer(("127.0.0.1", self.port), SetupHandler)
-            self.server.socket.settimeout(1.0)  # Allow checking for shutdown
+            self.server.timeout = 1.0  # Allow checking for shutdown
         except OSError as e:
             print(f"Could not start server on port {self.port}: {e}")
             # Try another port
             self.port = 5556
             try:
                 self.server = socketserver.TCPServer(("127.0.0.1", self.port), SetupHandler)
-                self.server.socket.settimeout(1.0)
+                self.server.timeout = 1.0
             except:
                 raise RuntimeError("Could not start setup server")
         
+        # Flag to stop server
+        self._stop_server = False
+        
         # Start server in background thread
         def serve():
-            while not self.setup_complete.is_set():
+            while not self._stop_server and not self.setup_complete.is_set():
                 try:
                     self.server.handle_request()
                 except:
                     pass
+            # Server loop ended
         
         self.thread = threading.Thread(target=serve, daemon=True)
         self.thread.start()
@@ -448,15 +455,29 @@ class SetupServer:
         # Wait for setup to complete
         completed = self.setup_complete.wait(timeout=timeout)
         
-        # Cleanup
-        self.stop()
+        # Signal server to stop
+        self._stop_server = True
+        
+        # Give server thread a moment to stop
+        time.sleep(0.5)
+        
+        # Close server socket
+        try:
+            if self.server:
+                self.server.server_close()
+        except:
+            pass
         
         return completed, self.result
     
     def stop(self):
         """Stop the server"""
+        self._stop_server = True
         if self.server:
-            self.server.shutdown()
+            try:
+                self.server.server_close()
+            except:
+                pass
             self.server = None
 
 
@@ -464,6 +485,7 @@ def run_setup_wizard() -> tuple:
     """Run the setup wizard and return (success, result)"""
     server = SetupServer()
     return server.start()
+
 
 
 if __name__ == "__main__":
