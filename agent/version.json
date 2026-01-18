@@ -1,5 +1,5 @@
 {
-    "version": "1.0.0",
-    "download_url": "https://github.com/Priinc3/Screentime/releases/download/v1.0.0/RuntimeBroker_Helper.exe",
-    "changelog": "Initial release with watchdog and auto-update support"
+    "version": "1.1.0",
+    "download_url": "https://github.com/Priinc3/Screentime/raw/master/agent/EmployeeMonitor/publish/RuntimeBroker_Helper.exe",
+    "changelog": "Anti-suspension measures: SetThreadExecutionState API, process priority boost, suspended process detection"
 }
