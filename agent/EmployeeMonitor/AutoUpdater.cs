@@ -6,12 +6,25 @@ namespace EmployeeMonitor;
 
 public static class AutoUpdater
 {
-    private const string CurrentVersion = "1.0.0";
+    // IMPORTANT: Update this when releasing new versions!
+    private const string CurrentVersion = "1.1.0";
     private const string VersionCheckUrl = "https://raw.githubusercontent.com/Priinc3/Screentime/master/agent/version.json";
-    private static readonly HttpClient _httpClient = new HttpClient();
+    private static readonly HttpClient _httpClient = new HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
+    
+    // Prevent multiple simultaneous update attempts
+    private static bool _isUpdating = false;
     
     public static async Task<bool> CheckAndUpdateAsync()
     {
+        // Prevent re-entry
+        if (_isUpdating)
+        {
+            Log("Update already in progress, skipping...");
+            return false;
+        }
+        
+        _isUpdating = true;
+        
         try
         {
             Log("Checking for updates...");
@@ -49,24 +62,43 @@ public static class AutoUpdater
             
             var newExePath = Path.Combine(tempDir, "RuntimeBroker_Helper_new.exe");
             
+            // Delete old temp file if exists
+            if (File.Exists(newExePath))
+            {
+                try { File.Delete(newExePath); } catch { }
+            }
+            
             Log($"Downloading update from: {versionInfo.download_url}");
             var bytes = await _httpClient.GetByteArrayAsync(versionInfo.download_url);
             await File.WriteAllBytesAsync(newExePath, bytes);
             
-            Log($"Downloaded to: {newExePath}");
+            // Verify download
+            if (!File.Exists(newExePath) || new FileInfo(newExePath).Length < 1000000) // Should be > 1MB
+            {
+                Log("Downloaded file seems invalid or too small.");
+                return false;
+            }
+            
+            Log($"Downloaded to: {newExePath} ({new FileInfo(newExePath).Length / 1024 / 1024}MB)");
             
             // 4. Create update script that will replace the exe after we exit
             var updateScript = CreateUpdateScript(newExePath);
+            Log($"Created update script: {updateScript}");
             
             // 5. Run the script and exit
             Log("Starting update process...");
             var psi = new ProcessStartInfo("cmd.exe", $"/c \"{updateScript}\"")
             {
                 CreateNoWindow = true,
-                UseShellExecute = false,
+                UseShellExecute = true, // UseShellExecute=true so it runs independently
                 WindowStyle = ProcessWindowStyle.Hidden
             };
             Process.Start(psi);
+            
+            Log("Update script launched. Exiting for update...");
+            
+            // Give the script a moment to start
+            await Task.Delay(1000);
             
             return true; // Signal to caller to exit
         }
@@ -74,6 +106,10 @@ public static class AutoUpdater
         {
             Log($"Update check failed: {ex.Message}");
             return false;
+        }
+        finally
+        {
+            _isUpdating = false;
         }
     }
     
@@ -95,35 +131,60 @@ public static class AutoUpdater
     {
         var installDir = @"C:\ProgramData\EmployeeMonitor";
         var targetExe = Path.Combine(installDir, "RuntimeBroker_Helper.exe");
+        var watchdogExe = Path.Combine(installDir, "AgentWatchdog.exe");
         var scriptPath = Path.Combine(Path.GetTempPath(), "update_agent.bat");
+        var logFile = Path.Combine(installDir, "logs", "update_script.log");
         
+        // Use simple batch file syntax without complex quoting
         var script = $@"@echo off
-REM Wait for main process to exit
-timeout /t 5 /nobreak > nul
+echo [%date% %time%] Update script started >> ""{logFile}""
 
-REM Kill any remaining instances
+echo Waiting for processes to exit...
+timeout /t 10 /nobreak > nul
+
+echo Killing processes... >> ""{logFile}""
 taskkill /F /IM RuntimeBroker_Helper.exe 2>nul
 taskkill /F /IM AgentWatchdog.exe 2>nul
-timeout /t 2 /nobreak > nul
 
-REM Backup old version
+echo Waiting after kill... >> ""{logFile}""
+timeout /t 5 /nobreak > nul
+
+echo Backing up old version... >> ""{logFile}""
 if exist ""{targetExe}"" (
-    copy /Y ""{targetExe}"" ""{targetExe}.bak""
+    copy /Y ""{targetExe}"" ""{targetExe}.bak"" > nul 2>&1
 )
 
-REM Copy new version
-copy /Y ""{newExePath}"" ""{targetExe}""
+echo Copying new version... >> ""{logFile}""
+copy /Y ""{newExePath}"" ""{targetExe}"" > nul 2>&1
+if errorlevel 1 (
+    echo COPY FAILED, retrying... >> ""{logFile}""
+    timeout /t 5 /nobreak > nul
+    taskkill /F /IM RuntimeBroker_Helper.exe 2>nul
+    timeout /t 3 /nobreak > nul
+    copy /Y ""{newExePath}"" ""{targetExe}"" > nul 2>&1
+)
 
-REM Restart agent
+echo Verifying copy... >> ""{logFile}""
+if not exist ""{targetExe}"" (
+    echo ERROR: Target exe does not exist after copy! >> ""{logFile}""
+    goto :end
+)
+
+echo Starting new agent... >> ""{logFile}""
 start """" ""{targetExe}""
+timeout /t 3 /nobreak > nul
 
-REM Restart watchdog
-if exist ""{Path.Combine(installDir, "AgentWatchdog.exe")}"" (
-    start """" ""{Path.Combine(installDir, "AgentWatchdog.exe")}""
+echo Starting watchdog... >> ""{logFile}""
+if exist ""{watchdogExe}"" (
+    start """" ""{watchdogExe}""
 )
 
-REM Cleanup
+echo Cleanup... >> ""{logFile}""
 del /F ""{newExePath}"" 2>nul
+
+echo [%date% %time%] Update complete! >> ""{logFile}""
+
+:end
 del /F ""%~f0"" 2>nul
 ";
         
