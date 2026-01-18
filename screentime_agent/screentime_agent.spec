@@ -19,6 +19,7 @@ APP_BUNDLE_ID = 'com.screentime.agent'
 
 # Hidden imports that PyInstaller might miss
 hidden_imports = [
+    # Supabase and dependencies
     'supabase',
     'postgrest',
     'realtime',
@@ -28,25 +29,47 @@ hidden_imports = [
     'httpx',
     'websockets',
     'pydantic',
+    'pydantic_core',
     'cffi',
     'cryptography',
-    # Platform-specific
+    'certifi',
+    'anyio',
+    'httpcore',
+    'h11',
+    'h2',
+    'hpack',
+    # HTTP server for setup
+    'http.server',
+    'socketserver',
+    'webbrowser',
+    'json',
+    'urllib.parse',
+    # SQLite for offline queue
+    'sqlite3',
+    # Platform-specific modules
     'watchers.platform.macos',
     'watchers.platform.windows',
     'watchers.platform.linux',
     'database.supabase_backend',
     'database.postgres_backend',
+    # Our modules
+    'config',
+    'models',
+    'service',
+    'installer',
+    'setup_server',
+    'offline_queue',
 ]
 
-# Collect supabase and related packages
+# Collect data files
 datas = []
-datas += collect_data_files('supabase')
+datas += collect_data_files('supabase', include_py_files=True)
 datas += collect_data_files('certifi')
 
 # Analysis
 a = Analysis(
     ['app_gui.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=datas,
     hiddenimports=hidden_imports,
@@ -54,12 +77,21 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        # Exclude tkinter - we don't use it
         'tkinter',
+        '_tkinter',
+        'tk',
+        'tcl',
+        # Exclude other heavy unused packages
         'matplotlib',
         'numpy',
         'pandas',
         'scipy',
-        'PIL',
+        'PIL.ImageTk',
+        'PyQt5',
+        'PyQt6',
+        'PySide2',
+        'PySide6',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -67,9 +99,10 @@ a = Analysis(
     noarchive=False,
 )
 
-# Remove unnecessary files to reduce size
+# Remove Qt binaries if they got included
 a.binaries = [x for x in a.binaries if not x[0].startswith('libQt')]
 a.binaries = [x for x in a.binaries if not x[0].startswith('PyQt')]
+a.binaries = [x for x in a.binaries if not x[0].startswith('Qt')]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
@@ -114,9 +147,11 @@ if is_macos:
             'CFBundleDisplayName': 'Screen Time Agent',
             'CFBundleVersion': APP_VERSION,
             'CFBundleShortVersionString': APP_VERSION,
-            'LSBackgroundOnly': True,  # Run as background app
-            'LSUIElement': True,  # No dock icon
+            'LSBackgroundOnly': False,  # Show briefly for setup, then hide
+            'LSUIElement': False,  # Will have menu bar icon
             'NSHighResolutionCapable': True,
+            'NSAppleEventsUsageDescription': 'Screen Time Agent needs to detect active windows.',
+            'NSAppleScriptEnabled': True,
         },
     )
 
@@ -143,4 +178,5 @@ else:
         codesign_identity=None,
         entitlements_file=None,
         icon=None,  # Add icon path here: 'assets/icon.ico'
+        version=None,  # Add version info file here
     )
