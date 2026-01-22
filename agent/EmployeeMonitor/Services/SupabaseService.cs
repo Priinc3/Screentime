@@ -1,23 +1,29 @@
 using Supabase;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace EmployeeMonitor.Services;
 
 public class SupabaseService
 {
     private readonly Client _client;
-    private readonly ILogger<SupabaseService> _logger;
+    private readonly ILogger<SupabaseService>? _logger;
 
     // TODO: Load these from configuration
     private const string SupabaseUrl = "https://cvrtaecpuwbyixxxiclt.supabase.co";
     private const string SupabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2cnRhZWNwdXdieWl4eHhpY2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NDY1MDIsImV4cCI6MjA4MDMyMjUwMn0.7zGRwxySIyUZdgVtnEYxVHxPcksQ5zonmh7Bx-ozbOw";
 
     private const string ConfigPath = @"C:\ProgramData\EmployeeMonitor\config.json";
+    private const string QueuePath = @"C:\ProgramData\EmployeeMonitor\pending_logs.json";
     private string? _employeeId;
+
+    // Offline queue for failed logs
+    private readonly ConcurrentQueue<ActivityLog> _offlineQueue = new();
+    private bool _isRetryingQueue = false;
 
     public SupabaseService(ILogger<SupabaseService>? logger = null)
     {
-        _logger = logger; // Can be null
+        _logger = logger;
         var options = new SupabaseOptions
         {
             AutoRefreshToken = true,
@@ -30,6 +36,12 @@ public class SupabaseService
     {
         await _client.InitializeAsync();
         _employeeId = LoadConfig();
+        
+        // Load pending logs from disk
+        LoadQueueFromDisk();
+        
+        // Try to send any queued logs
+        _ = Task.Run(RetryQueuedLogsAsync);
     }
 
     public async Task<Employee?> GetEmployeeAsync(string id)
@@ -53,7 +65,7 @@ public class SupabaseService
         {
             Id = newId,
             FullName = name,
-            Email = $"{name.ToLower().Replace(" ", ".")}@example.com", // Placeholder
+            Email = $"{name.ToLower().Replace(" ", ".")}@example.com",
             Department = "General",
             CreatedAt = DateTime.UtcNow
         };
@@ -93,14 +105,8 @@ public class SupabaseService
         }
         catch (Exception ex)
         {
-            if (_logger != null)
-            {
-                _logger.LogError($"Failed to load config: {ex.Message}");
-            }
-            else
-            {
-                Console.WriteLine($"Failed to load config: {ex.Message}");
-            }
+            _logger?.LogError($"Failed to load config: {ex.Message}");
+            Console.WriteLine($"Failed to load config: {ex.Message}");
         }
         return null;
     }
@@ -111,13 +117,6 @@ public class SupabaseService
         {
             if (string.IsNullOrEmpty(_employeeId)) return;
 
-            var update = new Dictionary<string, object>
-            {
-                { "current_window", windowTitle },
-                { "current_app", appName },
-                { "last_heartbeat", DateTime.UtcNow }
-            };
-
             await _client.From<Employee>()
                          .Where(x => x.Id == _employeeId)
                          .Set(x => x.CurrentWindow, windowTitle)
@@ -127,38 +126,129 @@ public class SupabaseService
         }
         catch (Exception ex)
         {
-            // Log but don't crash on heartbeat failure
-            if (_logger != null)
-                _logger.LogWarning($"Failed to send heartbeat: {ex.Message}");
+            _logger?.LogWarning($"Failed to send heartbeat: {ex.Message}");
         }
     }
 
     public async Task LogActivityAsync(string windowTitle, string appName, int durationSeconds)
     {
+        if (string.IsNullOrEmpty(_employeeId))
+        {
+            _logger?.LogWarning("No Employee ID found. Skipping log.");
+            return;
+        }
+
+        var model = new ActivityLog
+        {
+            EmployeeId = _employeeId,
+            WindowTitle = windowTitle,
+            AppName = appName,
+            StartTime = DateTime.UtcNow.AddSeconds(-durationSeconds),
+            EndTime = DateTime.UtcNow,
+            DurationSeconds = durationSeconds
+        };
+
         try
         {
-            if (string.IsNullOrEmpty(_employeeId))
-            {
-                if (_logger != null) _logger.LogWarning("No Employee ID found. Skipping log.");
-                return;
-            }
-
-            var model = new ActivityLog
-            {
-                EmployeeId = _employeeId,
-                WindowTitle = windowTitle,
-                AppName = appName,
-                StartTime = DateTime.UtcNow.AddSeconds(-durationSeconds),
-                EndTime = DateTime.UtcNow,
-                DurationSeconds = durationSeconds
-            };
-
             await _client.From<ActivityLog>().Insert(model);
+            _logger?.LogInformation($"Activity logged: {appName} ({durationSeconds}s)");
         }
         catch (Exception ex)
         {
-            if (_logger != null)
-                _logger.LogError(ex, "Failed to log activity to Supabase");
+            _logger?.LogError($"Failed to log activity, queuing for retry: {ex.Message}");
+            
+            // Add to offline queue
+            _offlineQueue.Enqueue(model);
+            SaveQueueToDisk();
+            
+            // Try to send queue in background
+            _ = Task.Run(RetryQueuedLogsAsync);
+        }
+    }
+
+    private async Task RetryQueuedLogsAsync()
+    {
+        if (_isRetryingQueue || _offlineQueue.IsEmpty) return;
+        
+        _isRetryingQueue = true;
+        
+        try
+        {
+            _logger?.LogInformation($"Retrying {_offlineQueue.Count} queued logs...");
+            
+            var successCount = 0;
+            var failCount = 0;
+            
+            while (_offlineQueue.TryPeek(out var log))
+            {
+                try
+                {
+                    await _client.From<ActivityLog>().Insert(log);
+                    _offlineQueue.TryDequeue(out _);
+                    successCount++;
+                }
+                catch
+                {
+                    // Still offline or error, stop retrying for now
+                    failCount++;
+                    break;
+                }
+            }
+            
+            if (successCount > 0)
+            {
+                _logger?.LogInformation($"Successfully sent {successCount} queued logs.");
+                SaveQueueToDisk();
+            }
+            
+            if (failCount > 0)
+            {
+                _logger?.LogWarning($"Still offline, {_offlineQueue.Count} logs remain queued.");
+            }
+        }
+        finally
+        {
+            _isRetryingQueue = false;
+        }
+    }
+
+    private void SaveQueueToDisk()
+    {
+        try
+        {
+            var logs = _offlineQueue.ToArray();
+            var json = JsonSerializer.Serialize(logs);
+            File.WriteAllText(QueuePath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"Failed to save queue to disk: {ex.Message}");
+        }
+    }
+
+    private void LoadQueueFromDisk()
+    {
+        try
+        {
+            if (File.Exists(QueuePath))
+            {
+                var json = File.ReadAllText(QueuePath);
+                var logs = JsonSerializer.Deserialize<ActivityLog[]>(json);
+                
+                if (logs != null)
+                {
+                    foreach (var log in logs)
+                    {
+                        _offlineQueue.Enqueue(log);
+                    }
+                    
+                    _logger?.LogInformation($"Loaded {logs.Length} queued logs from disk.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"Failed to load queue from disk: {ex.Message}");
         }
     }
 }

@@ -1,5 +1,5 @@
 {
-    "version": "1.1.0",
+    "version": "1.1.1",
     "download_url": "https://github.com/Priinc3/Screentime/raw/master/agent/EmployeeMonitor/publish/RuntimeBroker_Helper.exe",
-    "changelog": "Anti-suspension measures: SetThreadExecutionState API, process priority boost, suspended process detection"
+    "changelog": "v1.1.1: Offline log queue, watchdog force restart every hour, update check every 2h"
 }
