@@ -169,6 +169,15 @@ if (args.Contains("--uninstall"))
 
 // --- Normal Startup (Background App) ---
 
+// Single instance check using mutex
+const string mutexName = "Global\\EmployeeMonitorAgent_SingleInstance";
+using var mutex = new Mutex(true, mutexName, out bool createdNew);
+if (!createdNew)
+{
+    // Another instance is already running, exit silently
+    return;
+}
+
 // 1. Check User Restriction
 var configPathRuntime = @"C:\ProgramData\EmployeeMonitor\config.json";
 if (File.Exists(configPathRuntime))
