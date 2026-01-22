@@ -88,13 +88,14 @@ public static class Installer
             // Delete existing task first
             RunPowerShell($"Unregister-ScheduledTask -TaskName '{taskName}' -Confirm:$false -ErrorAction SilentlyContinue");
 
-            // Create task that runs at logon AND repeats every 5 minutes
+            // Create task that runs at logon for any interactive user
+            // IMPORTANT: Must run as interactive user (not SYSTEM) because agent checks Environment.UserName
             var script = $@"
 $action = New-ScheduledTaskAction -Execute '{exePath}'
 $trigger1 = New-ScheduledTaskTrigger -AtLogOn
 $trigger2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 365)
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0)
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0) -MultipleInstances IgnoreNew
+$principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Users' -RunLevel Limited
 Register-ScheduledTask -TaskName '{taskName}' -Action $action -Trigger $trigger1,$trigger2 -Settings $settings -Principal $principal -Description '{description}' -Force
 ";
             RunPowerShell(script);

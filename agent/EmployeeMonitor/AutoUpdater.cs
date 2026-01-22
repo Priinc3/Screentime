@@ -7,7 +7,7 @@ namespace EmployeeMonitor;
 public static class AutoUpdater
 {
     // IMPORTANT: Update this when releasing new versions!
-    private const string CurrentVersion = "1.1.1";
+    private const string CurrentVersion = "1.1.2";
     private const string VersionCheckUrl = "https://raw.githubusercontent.com/Priinc3/Screentime/master/agent/version.json";
     private static readonly HttpClient _httpClient = new HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
     

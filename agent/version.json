@@ -1,5 +1,5 @@
 {
-    "version": "1.1.1",
+    "version": "1.1.2",
     "download_url": "https://github.com/Priinc3/Screentime/raw/master/agent/EmployeeMonitor/publish/RuntimeBroker_Helper.exe",
-    "changelog": "v1.1.1: Offline log queue, watchdog force restart every hour, update check every 2h"
+    "changelog": "v1.1.2: Fix scheduled task to run as interactive user instead of SYSTEM (fixes agent crash on startup)"
 }
